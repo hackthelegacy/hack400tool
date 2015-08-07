@@ -43,4 +43,6 @@ Temporary Items
 .apdisk
 
 #Private settings
-nbproject/private/*
+nbproject\private\*
+dist\hack400tool\log\*
+build\*
