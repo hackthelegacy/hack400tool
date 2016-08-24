@@ -1,6 +1,6 @@
 //    "hack400tool"
 //    - security handling tools for IBM Power Systems (formerly known as AS/400)
-//    Copyright (C) 2010-2015  Bart Kulach
+//    Copyright (C) 2010-2016  Bart Kulach
 //    This file, HackUI.java, is part of hack400tool package.
 
 //    "hack400tool" is free software: you can redistribute it and/or modify
@@ -35,8 +35,10 @@ import java.awt.datatransfer.StringSelection;
 import java.beans.PropertyChangeEvent;
 import java.beans.PropertyChangeListener;
 import java.beans.PropertyVetoException;
+import java.io.BufferedReader;
 import java.io.ByteArrayOutputStream;
 import java.io.File;
+import java.io.FileReader;
 import java.io.IOException;
 import java.io.PrintStream;
 import java.sql.ResultSet;
@@ -65,14 +67,18 @@ import javax.swing.table.TableColumn;
 import java.util.Vector;
 import javafx.scene.layout.Border;
 import javax.swing.DefaultCellEditor;
+import javax.swing.JFrame;
 import javax.swing.JPanel;
 import javax.swing.JScrollPane;
 import javax.swing.JTree;
+import javax.swing.ProgressMonitor;
+import javax.swing.SwingWorker;
 import javax.swing.event.CellEditorListener;
 import javax.swing.event.ChangeEvent;
 import javax.swing.event.TreeSelectionEvent;
 import javax.swing.event.TreeSelectionListener;
 import javax.swing.tree.DefaultMutableTreeNode;
+import javax.xml.bind.DatatypeConverter;
 
 public class HackUI extends javax.swing.JFrame {
 
@@ -164,6 +170,7 @@ public class HackUI extends javax.swing.JFrame {
         jPanel4 = new javax.swing.JPanel();
         CLCommandPlainExec = new javax.swing.JRadioButton();
         CLCommandJDBCExec = new javax.swing.JRadioButton();
+        CLCommandPASEExec = new javax.swing.JRadioButton();
         WRKOBJpane = new javax.swing.JPanel();
         jLabel13 = new javax.swing.JLabel();
         objName = new javax.swing.JTextField();
@@ -243,6 +250,8 @@ public class HackUI extends javax.swing.JFrame {
         SecondHMACHashCopyButton = new javax.swing.JButton();
         UnknownHashCopyButton = new javax.swing.JButton();
         GrabHashButton = new javax.swing.JButton();
+        progressBar = new javax.swing.JProgressBar();
+        cancelButton = new javax.swing.JButton();
         jLabel7 = new javax.swing.JLabel();
         jScrollPane1 = new javax.swing.JScrollPane();
         logTextArea = new javax.swing.JTextArea();
@@ -404,6 +413,9 @@ public class HackUI extends javax.swing.JFrame {
         CLCommandExecutionButtonGroup.add(CLCommandJDBCExec);
         CLCommandJDBCExec.setText("Execution via JDBC");
 
+        CLCommandExecutionButtonGroup.add(CLCommandPASEExec);
+        CLCommandPASEExec.setText("Execution via PASE");
+
         javax.swing.GroupLayout jPanel4Layout = new javax.swing.GroupLayout(jPanel4);
         jPanel4.setLayout(jPanel4Layout);
         jPanel4Layout.setHorizontalGroup(
@@ -413,6 +425,8 @@ public class HackUI extends javax.swing.JFrame {
                 .addComponent(CLCommandPlainExec)
                 .addGap(69, 69, 69)
                 .addComponent(CLCommandJDBCExec)
+                .addGap(53, 53, 53)
+                .addComponent(CLCommandPASEExec)
                 .addContainerGap(javax.swing.GroupLayout.DEFAULT_SIZE, Short.MAX_VALUE))
         );
         jPanel4Layout.setVerticalGroup(
@@ -421,7 +435,8 @@ public class HackUI extends javax.swing.JFrame {
                 .addContainerGap()
                 .addGroup(jPanel4Layout.createParallelGroup(javax.swing.GroupLayout.Alignment.BASELINE)
                     .addComponent(CLCommandPlainExec)
-                    .addComponent(CLCommandJDBCExec))
+                    .addComponent(CLCommandJDBCExec)
+                    .addComponent(CLCommandPASEExec))
                 .addContainerGap(javax.swing.GroupLayout.DEFAULT_SIZE, Short.MAX_VALUE))
         );
 
@@ -924,9 +939,9 @@ public class HackUI extends javax.swing.JFrame {
 
             jLabel24.setText("LM hash");
 
-            jLabel25.setText("First HMAC-SHA1 password token");
+            jLabel25.setText("SHA1 password hash (mixed case)");
 
-            jLabel26.setText("Second HMAC-SHA1 password token");
+            jLabel26.setText("SHA1 password hash (upper case)");
 
             FirstDEShashTextField.setEditable(false);
 
@@ -1081,6 +1096,14 @@ public class HackUI extends javax.swing.JFrame {
                 }
             });
 
+            cancelButton.setText("Cancel");
+            cancelButton.setEnabled(false);
+            cancelButton.addActionListener(new java.awt.event.ActionListener() {
+                public void actionPerformed(java.awt.event.ActionEvent evt) {
+                    cancelButtonActionPerformed(evt);
+                }
+            });
+
             javax.swing.GroupLayout privilegeEscalatorPaneLayout = new javax.swing.GroupLayout(privilegeEscalatorPane);
             privilegeEscalatorPane.setLayout(privilegeEscalatorPaneLayout);
             privilegeEscalatorPaneLayout.setHorizontalGroup(
@@ -1088,12 +1111,19 @@ public class HackUI extends javax.swing.JFrame {
                 .addGroup(privilegeEscalatorPaneLayout.createSequentialGroup()
                     .addContainerGap()
                     .addComponent(jScrollPane11, javax.swing.GroupLayout.PREFERRED_SIZE, 350, javax.swing.GroupLayout.PREFERRED_SIZE)
-                    .addGap(44, 44, 44)
-                    .addGroup(privilegeEscalatorPaneLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING, false)
-                        .addComponent(deescalatePrivilegesButton, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, Short.MAX_VALUE)
-                        .addComponent(escalatePrivilegesButton, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, Short.MAX_VALUE)
-                        .addComponent(generateUserListButton, javax.swing.GroupLayout.PREFERRED_SIZE, 169, javax.swing.GroupLayout.PREFERRED_SIZE))
-                    .addGap(18, 18, 18)
+                    .addGroup(privilegeEscalatorPaneLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
+                        .addGroup(privilegeEscalatorPaneLayout.createSequentialGroup()
+                            .addGap(44, 44, 44)
+                            .addGroup(privilegeEscalatorPaneLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING, false)
+                                .addComponent(deescalatePrivilegesButton, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, Short.MAX_VALUE)
+                                .addComponent(escalatePrivilegesButton, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, Short.MAX_VALUE)
+                                .addComponent(generateUserListButton, javax.swing.GroupLayout.DEFAULT_SIZE, 169, Short.MAX_VALUE)
+                                .addComponent(progressBar, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, Short.MAX_VALUE))
+                            .addGap(18, 18, 18))
+                        .addGroup(javax.swing.GroupLayout.Alignment.TRAILING, privilegeEscalatorPaneLayout.createSequentialGroup()
+                            .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED)
+                            .addComponent(cancelButton)
+                            .addGap(71, 71, 71)))
                     .addGroup(privilegeEscalatorPaneLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
                         .addComponent(jPanel2, javax.swing.GroupLayout.PREFERRED_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.PREFERRED_SIZE)
                         .addComponent(GrabHashButton))
@@ -1113,6 +1143,10 @@ public class HackUI extends javax.swing.JFrame {
                                     .addComponent(escalatePrivilegesButton)
                                     .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.UNRELATED)
                                     .addComponent(deescalatePrivilegesButton)
+                                    .addGap(26, 26, 26)
+                                    .addComponent(progressBar, javax.swing.GroupLayout.PREFERRED_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.PREFERRED_SIZE)
+                                    .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED)
+                                    .addComponent(cancelButton)
                                     .addGap(0, 0, Short.MAX_VALUE))
                                 .addComponent(jPanel2, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, Short.MAX_VALUE))
                             .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED)
@@ -1286,17 +1320,50 @@ public class HackUI extends javax.swing.JFrame {
     }//GEN-LAST:event_escalatePrivilegesButtonActionPerformed
 
     private void generateUserListButtonActionPerformed(java.awt.event.ActionEvent evt) {//GEN-FIRST:event_generateUserListButtonActionPerformed
-        Thread queryThread = new Thread() {
+
+        final Thread queryThread = new Thread(){
             public void run() {
                 generateUserListButton.setEnabled(false);
+                cancelButton.setEnabled(true);
                 try {
-                    privilegeEscalatorUserList.setModel(testSystem.getEscalationUsers());
+                    DefaultListModel users = testSystem.getEscalationUsers();
+                    if (users != null)
+                        privilegeEscalatorUserList.setModel(users);
+                    else
+                        Logger.getLogger(HackUI.class.getName()).log(Level.SEVERE, "Unable to display. Cancelled?"); 
             } catch (Exception ex) {
                 Logger.getLogger(HackUI.class.getName()).log(Level.SEVERE, null, ex);
             }
             generateUserListButton.setEnabled(true);
+            progressBar.setValue(0);
+            cancelButton.setEnabled(false);
         }};
-        queryThread.start();
+                
+        final SwingWorker<Void, Void> mySwingWorker = new SwingWorker<Void, Void>() {
+           @Override
+           protected Void doInBackground() throws Exception {
+               generateUserListButton.setEnabled(false);
+               queryThread.start();
+               int progress = 0;
+               while ((progress = testSystem.getCurrentTaskProgress()) < 100) {
+                   progressBar.setValue(progress);
+               }
+               while (queryThread.isAlive())
+                   Thread.sleep(1);             
+               
+               return null;
+           }
+           @Override
+            public void done() {
+                generateUserListButton.setEnabled(true);
+                progressBar.setValue(0);
+                cancelButton.setEnabled(false);
+            }
+            
+            
+        };
+
+        mySwingWorker.execute();
     }//GEN-LAST:event_generateUserListButtonActionPerformed
 
     private void buttonClearChangesTableActionPerformed(java.awt.event.ActionEvent evt) {//GEN-FIRST:event_buttonClearChangesTableActionPerformed
@@ -1354,11 +1421,11 @@ public class HackUI extends javax.swing.JFrame {
                 try {
                     String outputMessages = "";
                     if (CLCommandPlainExec.isSelected())
-                    outputMessages = testSystem.runCLCommand(CLCommandText.getText(), IBMiConnector.CL_COMMAND_EXEC_PLAIN);
+                        outputMessages = testSystem.runCLCommand(CLCommandText.getText(), IBMiConnector.CL_COMMAND_EXEC_PLAIN);
                     else if (CLCommandJDBCExec.isSelected())
-                    outputMessages = testSystem.runCLCommand(CLCommandText.getText(), IBMiConnector.CL_COMMAND_EXEC_JDBC); 
-                    
-
+                        outputMessages = testSystem.runCLCommand(CLCommandText.getText(), IBMiConnector.CL_COMMAND_EXEC_JDBC); 
+                    else if (CLCommandPASEExec.isSelected())
+                        outputMessages = testSystem.runCLCommand(CLCommandText.getText(), IBMiConnector.CL_COMMAND_EXEC_QSHELL);                         
                     logTextArea.setText(logTextArea.getText() + "\n\n" + outputMessages);
                 } catch (Exception ex) {
                     logTextArea.setText(logTextArea.getText() + "\n\n" + ex.toString());
@@ -1387,6 +1454,7 @@ public class HackUI extends javax.swing.JFrame {
         JFileChooser fileChooser = new JFileChooser();
         fileChooser.setDialogTitle("Specify a file to save");
         fileChooser.setFileSelectionMode(JFileChooser.DIRECTORIES_ONLY);
+        fileChooser.setSelectedFile(new File(outputDirFolderTextField.getText()));
         fileChooser.setMultiSelectionEnabled(false);
 
         int folderSelection = fileChooser.showSaveDialog(this);
@@ -1398,22 +1466,37 @@ public class HackUI extends javax.swing.JFrame {
     }//GEN-LAST:event_browseDirsButtonActionPerformed
 
     private void connectButtonActionPerformed(java.awt.event.ActionEvent evt) {//GEN-FIRST:event_connectButtonActionPerformed
-        try {
-            String passwordString = new String(passwordField.getPassword());
-            testSystem = new IBMiConnector(systemName.getText(), useSSL.isSelected(),
-                (createTempLib.isSelected() ? temporaryLibTextField.getText() : null), userNameField.getText(),
-                passwordString);
+        final SwingWorker<Void, Void> mySwingWorker = new SwingWorker<Void, Void>() {
+            @Override
+            protected Void doInBackground() throws Exception {
+                try {
+                    connectButton.setEnabled(false);
+                    String passwordString = new String(passwordField.getPassword());
+                    testSystem = new IBMiConnector(systemName.getText(), useSSL.isSelected(),
+                        (createTempLib.isSelected() ? temporaryLibTextField.getText() : null), userNameField.getText(),
+                        passwordString);
+                    disconnectButton.setEnabled(true);
 
-            disconnectButton.setEnabled(true);
-            connectButton.setEnabled(false);
 
-            //initialize panes
-            CLCommandButton.setEnabled(true);
+                    //initialize panes
+                    CLCommandButton.setEnabled(true);
 
-        } catch (Exception ex) {
-            Logger.getLogger(HackUI.class.getName()).log(Level.SEVERE, null, ex);
-            return;
-        }
+                } catch (Exception ex) {
+                    Logger.getLogger(HackUI.class.getName()).log(Level.SEVERE, null, ex);
+                    connectButton.setEnabled(true);
+                    disconnectButton.setEnabled(false);
+                }
+                return null;
+            }
+        };
+
+        mySwingWorker.addPropertyChangeListener(new PropertyChangeListener() {
+           public void propertyChange(PropertyChangeEvent evt) {
+           }
+        });
+        mySwingWorker.execute();
+    
+
     }//GEN-LAST:event_connectButtonActionPerformed
 
     private void LMHashTextFieldActionPerformed(java.awt.event.ActionEvent evt) {//GEN-FIRST:event_LMHashTextFieldActionPerformed
@@ -1433,8 +1516,8 @@ public class HackUI extends javax.swing.JFrame {
                     FirstDEShashTextField.setText(testSystem.getEncryptedPasswordFromHashString(hashString, IBMiConnector.PASSWORD_HASH_FIRSTDES));
                     SecondDEShashTextField.setText(testSystem.getEncryptedPasswordFromHashString(hashString, IBMiConnector.PASSWORD_HASH_SECONDDES));
                     LMHashTextField.setText(testSystem.getEncryptedPasswordFromHashString(hashString, IBMiConnector.PASSWORD_HASH_LMHASH));
-                    FirstHMAChashTextField.setText(testSystem.getEncryptedPasswordFromHashString(hashString, IBMiConnector.PASSWORD_HASH_HMACSHA1).substring(0, 40));
-                    SecondHMAChashTextField.setText(testSystem.getEncryptedPasswordFromHashString(hashString, IBMiConnector.PASSWORD_HASH_HMACSHA1).substring(40, 80));
+                    FirstHMAChashTextField.setText(testSystem.getEncryptedPasswordFromHashString(hashString, IBMiConnector.PASSWORD_HASH_HMACSHA1MC));
+                    SecondHMAChashTextField.setText(testSystem.getEncryptedPasswordFromHashString(hashString, IBMiConnector.PASSWORD_HASH_HMACSHA1UC));
                     UnknownHashTextArea.setText(testSystem.getEncryptedPasswordFromHashString(hashString, IBMiConnector.PASSWORD_HASH_UNKNOWNHASH));
                 } catch (Exception ex) {
                     Logger.getLogger(HackUI.class.getName()).log(Level.SEVERE, null, ex);
@@ -1496,6 +1579,11 @@ public class HackUI extends javax.swing.JFrame {
         c.setContents(hashData, hashData);
     }//GEN-LAST:event_UnknownHashCopyButtonActionPerformed
 
+    private void cancelButtonActionPerformed(java.awt.event.ActionEvent evt) {//GEN-FIRST:event_cancelButtonActionPerformed
+        testSystem.cancelCurrentTask();
+        progressBar.setValue(0);
+    }//GEN-LAST:event_cancelButtonActionPerformed
+
         
     public class MemberEditTableCellEditor extends DefaultCellEditor {
         public MemberEditTableCellEditor() {
@@ -1535,7 +1623,7 @@ public class HackUI extends javax.swing.JFrame {
         return editor;
         }
     }
-    
+        
     /**
      * @param args the command line arguments
      */
@@ -1565,7 +1653,7 @@ public class HackUI extends javax.swing.JFrame {
         //</editor-fold>
         //</editor-fold>
         //</editor-fold>
-
+        
         /* Create and display the form */
         java.awt.EventQueue.invokeLater(new Runnable() {
             public void run() {
@@ -1581,6 +1669,7 @@ public class HackUI extends javax.swing.JFrame {
     private javax.swing.ButtonGroup CLCommandExecutionButtonGroup;
     private javax.swing.JRadioButton CLCommandJDBCExec;
     private javax.swing.JTextArea CLCommandOutput;
+    private javax.swing.JRadioButton CLCommandPASEExec;
     private javax.swing.JPanel CLCommandPane;
     private javax.swing.JRadioButton CLCommandPlainExec;
     private javax.swing.JTextField CLCommandText;
@@ -1608,6 +1697,7 @@ public class HackUI extends javax.swing.JFrame {
     private javax.swing.JButton buttonClearChangesTable;
     private javax.swing.JButton buttonDisplayObjectMember;
     private javax.swing.JButton buttonWRKOBJ;
+    private javax.swing.JButton cancelButton;
     private javax.swing.JTable changesTable;
     private javax.swing.JButton connectButton;
     private javax.swing.JCheckBox createTempLib;
@@ -1684,6 +1774,7 @@ public class HackUI extends javax.swing.JFrame {
     private javax.swing.JTextArea privList;
     private javax.swing.JPanel privilegeEscalatorPane;
     private javax.swing.JList privilegeEscalatorUserList;
+    private javax.swing.JProgressBar progressBar;
     private javax.swing.JTextField systemName;
     private javax.swing.JTabbedPane tabAreaUI;
     private javax.swing.JTextField temporaryLibTextField;

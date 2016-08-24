@@ -400,6 +400,8 @@
                               <Component id="CLCommandPlainExec" min="-2" max="-2" attributes="0"/>
                               <EmptySpace min="-2" pref="69" max="-2" attributes="0"/>
                               <Component id="CLCommandJDBCExec" min="-2" max="-2" attributes="0"/>
+                              <EmptySpace min="-2" pref="53" max="-2" attributes="0"/>
+                              <Component id="CLCommandPASEExec" min="-2" max="-2" attributes="0"/>
                               <EmptySpace max="32767" attributes="0"/>
                           </Group>
                       </Group>
@@ -411,6 +413,7 @@
                               <Group type="103" groupAlignment="3" attributes="0">
                                   <Component id="CLCommandPlainExec" alignment="3" min="-2" max="-2" attributes="0"/>
                                   <Component id="CLCommandJDBCExec" alignment="3" min="-2" max="-2" attributes="0"/>
+                                  <Component id="CLCommandPASEExec" alignment="3" min="-2" max="-2" attributes="0"/>
                               </Group>
                               <EmptySpace max="32767" attributes="0"/>
                           </Group>
@@ -433,6 +436,14 @@
                           <ComponentRef name="CLCommandExecutionButtonGroup"/>
                         </Property>
                         <Property name="text" type="java.lang.String" value="Execution via JDBC"/>
+                      </Properties>
+                    </Component>
+                    <Component class="javax.swing.JRadioButton" name="CLCommandPASEExec">
+                      <Properties>
+                        <Property name="buttonGroup" type="javax.swing.ButtonGroup" editor="org.netbeans.modules.form.RADComponent$ButtonGroupPropertyEditor">
+                          <ComponentRef name="CLCommandExecutionButtonGroup"/>
+                        </Property>
+                        <Property name="text" type="java.lang.String" value="Execution via PASE"/>
                       </Properties>
                     </Component>
                   </SubComponents>
@@ -1134,13 +1145,23 @@
                       <Group type="102" alignment="0" attributes="0">
                           <EmptySpace max="-2" attributes="0"/>
                           <Component id="jScrollPane11" min="-2" pref="350" max="-2" attributes="0"/>
-                          <EmptySpace min="-2" pref="44" max="-2" attributes="0"/>
-                          <Group type="103" groupAlignment="0" max="-2" attributes="0">
-                              <Component id="deescalatePrivilegesButton" alignment="0" max="32767" attributes="0"/>
-                              <Component id="escalatePrivilegesButton" alignment="0" max="32767" attributes="0"/>
-                              <Component id="generateUserListButton" alignment="0" min="-2" pref="169" max="-2" attributes="0"/>
+                          <Group type="103" groupAlignment="0" attributes="0">
+                              <Group type="102" attributes="0">
+                                  <EmptySpace min="-2" pref="44" max="-2" attributes="0"/>
+                                  <Group type="103" groupAlignment="0" max="-2" attributes="0">
+                                      <Component id="deescalatePrivilegesButton" alignment="0" max="32767" attributes="0"/>
+                                      <Component id="escalatePrivilegesButton" alignment="0" max="32767" attributes="0"/>
+                                      <Component id="generateUserListButton" alignment="0" pref="169" max="32767" attributes="0"/>
+                                      <Component id="progressBar" max="32767" attributes="0"/>
+                                  </Group>
+                                  <EmptySpace type="separate" max="-2" attributes="0"/>
+                              </Group>
+                              <Group type="102" alignment="1" attributes="0">
+                                  <EmptySpace max="-2" attributes="0"/>
+                                  <Component id="cancelButton" min="-2" max="-2" attributes="0"/>
+                                  <EmptySpace min="-2" pref="71" max="-2" attributes="0"/>
+                              </Group>
                           </Group>
-                          <EmptySpace type="separate" max="-2" attributes="0"/>
                           <Group type="103" groupAlignment="0" attributes="0">
                               <Component id="jPanel2" min="-2" max="-2" attributes="0"/>
                               <Component id="GrabHashButton" min="-2" max="-2" attributes="0"/>
@@ -1163,6 +1184,10 @@
                                           <Component id="escalatePrivilegesButton" min="-2" max="-2" attributes="0"/>
                                           <EmptySpace type="unrelated" max="-2" attributes="0"/>
                                           <Component id="deescalatePrivilegesButton" min="-2" max="-2" attributes="0"/>
+                                          <EmptySpace min="-2" pref="26" max="-2" attributes="0"/>
+                                          <Component id="progressBar" min="-2" max="-2" attributes="0"/>
+                                          <EmptySpace max="-2" attributes="0"/>
+                                          <Component id="cancelButton" min="-2" max="-2" attributes="0"/>
                                           <EmptySpace min="0" pref="0" max="32767" attributes="0"/>
                                       </Group>
                                       <Component id="jPanel2" max="32767" attributes="0"/>
@@ -1349,12 +1374,12 @@
                     </Component>
                     <Component class="javax.swing.JLabel" name="jLabel25">
                       <Properties>
-                        <Property name="text" type="java.lang.String" value="First HMAC-SHA1 password token"/>
+                        <Property name="text" type="java.lang.String" value="SHA1 password hash (mixed case)"/>
                       </Properties>
                     </Component>
                     <Component class="javax.swing.JLabel" name="jLabel26">
                       <Properties>
-                        <Property name="text" type="java.lang.String" value="Second HMAC-SHA1 password token"/>
+                        <Property name="text" type="java.lang.String" value="SHA1 password hash (upper case)"/>
                       </Properties>
                     </Component>
                     <Component class="javax.swing.JTextField" name="FirstDEShashTextField">
@@ -1470,6 +1495,17 @@
                   </Properties>
                   <Events>
                     <EventHandler event="actionPerformed" listener="java.awt.event.ActionListener" parameters="java.awt.event.ActionEvent" handler="GrabHashButtonActionPerformed"/>
+                  </Events>
+                </Component>
+                <Component class="javax.swing.JProgressBar" name="progressBar">
+                </Component>
+                <Component class="javax.swing.JButton" name="cancelButton">
+                  <Properties>
+                    <Property name="text" type="java.lang.String" value="Cancel"/>
+                    <Property name="enabled" type="boolean" value="false"/>
+                  </Properties>
+                  <Events>
+                    <EventHandler event="actionPerformed" listener="java.awt.event.ActionListener" parameters="java.awt.event.ActionEvent" handler="cancelButtonActionPerformed"/>
                   </Events>
                 </Component>
               </SubComponents>

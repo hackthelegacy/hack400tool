@@ -17,28 +17,111 @@
 //    along with this program.  If not, see <http://www.gnu.org/licenses/>.
 package org.hackthelegacy.hack400tool.ibmiscannercore;
 
+import java.io.File;
+import java.io.FileOutputStream;
+import java.io.IOException;
 import java.sql.*;
+import java.text.SimpleDateFormat;
 import javax.swing.DefaultListModel;
 import javax.swing.tree.DefaultTreeModel;
 import javax.swing.tree.DefaultMutableTreeNode;
 import javax.swing.table.DefaultTableModel;
 import java.util.Vector;
+import java.util.logging.Level;
+import java.util.logging.Logger;
+import org.apache.poi.ss.usermodel.Cell;
+import org.apache.poi.ss.usermodel.Row;
+import org.apache.poi.ss.usermodel.Sheet;
+import org.apache.poi.ss.usermodel.Workbook;
+import org.apache.poi.xssf.usermodel.XSSFWorkbook;
+import org.apache.poi.xwpf.usermodel.XWPFDocument;
+import org.apache.poi.xwpf.usermodel.XWPFParagraph;
+import org.apache.poi.xwpf.usermodel.XWPFRun;
 
 public class SqliteDbConnector {
 
     private Connection dbConnection = null;
+    private String databaseName = "";
     
 
-    public SqliteDbConnector(String dbName){
+    public SqliteDbConnector(String dbName, boolean deleteOnExit){
         try{
             Class.forName("org.sqlite.JDBC");
-            dbConnection = DriverManager.getConnection("jdbc:sqlite:"+dbName);                    
+            dbConnection = DriverManager.getConnection("jdbc:sqlite:"+dbName);
+            databaseName = dbName;
         }
         catch (Exception e){
             e.printStackTrace();
         }
+        if (deleteOnExit)
+            deleteDatabase(true);
     }
     
+    public SqliteDbConnector(String dbName){
+        this(dbName, false);
+    }    
+
+    public void deleteDatabase()
+    {
+        deleteDatabase(false);
+    }
+    
+    public void deleteDatabase(boolean deleteOnExit)
+    {
+        File jarFile = new File(SqliteDbConnector.class.getProtectionDomain().getCodeSource().getLocation().getPath());
+        String jarPath = jarFile.getParentFile().getPath();
+        File dbFile = new File(jarPath + File.separator + databaseName);
+        if (deleteOnExit)
+            dbFile.deleteOnExit();
+        else
+            dbFile.delete();        
+    }
+    
+    public void disconnect() throws SQLException
+    {
+        //dbConnection.commit();
+        dbConnection.close();
+    }
+    
+    public void insertrow(String tableName, Vector values) throws SQLException
+    {
+        String queryString = "INSERT INTO " + tableName.replaceAll("[^A-Za-z0-9]", "") + " VALUES("; 
+        for (Object value : values)
+            //queryString += "\"" + String.valueOf(value).replaceAll("[^A-Za-z0-9\\-\\ \\.\\,\\(\\)\\[\\]\\*\\#\\_\\$\\/\\@]", "") + "\", ";
+            queryString += "\"" + String.valueOf(value).replaceAll("[\"\']", "") + "\", ";
+        
+        queryString = queryString.substring(0,queryString.length()-2) + ");";
+        this.query(queryString);
+    }
+    
+    public String createTempTable(String tableName, int colNumber) throws SQLException {
+        String realTableName = tableName + (new SimpleDateFormat("YYMMddHHmmSS").format(new java.util.Date()));
+        String queryString = "CREATE TABLE " + realTableName + "(_0 VARCHAR";
+        for (int i=1; i<colNumber;i++)
+            queryString += ", _"  + String.valueOf(i) + " VARCHAR";        
+        queryString += ");";
+        this.query(queryString);
+        return realTableName;
+    }
+
+    private void prepareFile(String fileName) throws IOException {
+        File workFile = new File(fileName);
+        if (!workFile.exists()) {
+            workFile.getParentFile().mkdirs();
+            workFile.createNewFile();
+        }        
+    }
+    
+    public void exportXLSX(String fileName, String tableName) throws SQLException
+    {        
+        this.query("SELECT * FROM " + tableName.replaceAll("[^A-Za-z0-9]", "") + ";").toXLSX(fileName);
+    }
+
+    public void exportDOCX(String fileName, String tableName) throws SQLException
+    {        
+        this.query("SELECT _1 FROM " + tableName.replaceAll("[^A-Za-z0-9]", "") + ";").toDOCX(fileName);
+    }
+
     public Query query(String queryString) throws SQLException {
         return new Query(queryString);
     }
@@ -52,12 +135,14 @@ public class SqliteDbConnector {
         Query(String queryString) throws SQLException {
             String tmpQuery;
             
-            if (queryString.toUpperCase().startsWith("SELECT") || 
+            if (queryString.toUpperCase().startsWith("SELECT") ||
+                queryString.toUpperCase().startsWith("CREATE") ||    
                 queryString.toUpperCase().startsWith("INSERT") ||
                 queryString.toUpperCase().startsWith("UPDATE") ||
                 queryString.toUpperCase().startsWith("DELETE")) {
                 statement = dbConnection.prepareStatement(queryString);
-                resultSet = statement.executeQuery();
+                if (statement.execute())
+                    resultSet = statement.getResultSet();
             } else {
                 statement = dbConnection.prepareStatement(
                         "SELECT sqlcommand FROM sqlcommands WHERE id = ? LIMIT 1;");
@@ -101,6 +186,7 @@ public class SqliteDbConnector {
             return resultTableModel;
         }
         
+        
         public DefaultListModel toListModel() throws SQLException {
         //Note: The assumption is that the list elements reside in the last column
             
@@ -129,6 +215,73 @@ public class SqliteDbConnector {
             DefaultTreeModel resultTreeModel = new DefaultTreeModel(new DefaultMutableTreeNode("Resultset"));
             return resultTreeModel;
         }
+
+        public void toXLSX(String fileName) throws SQLException {
+
+            if (resultSet == null || dbConnection == null) 
+                return;
+            
+            ResultSetMetaData metaData = resultSet.getMetaData();
+            int numberOfColumns = metaData.getColumnCount();
+            
+            Workbook excelWorkbook = new XSSFWorkbook();
+            System.out.println("Save as file: " + fileName);
+            try {
+                prepareFile(fileName);
+                FileOutputStream fileOutStream = new FileOutputStream(fileName);                
+                Sheet sheet = excelWorkbook.createSheet(fileName.replaceAll("[:\\\\////]", "."));
+
+                int rowNum = 0;
+                while (resultSet.next()) {
+                    Row row = sheet.createRow(rowNum);
+                    for (int colNum=1; colNum <= numberOfColumns; colNum++) {
+                        Cell cell = row.createCell(colNum-1);
+                            cell.setCellValue(String.valueOf(resultSet.getObject(colNum)));
+                    }
+                    rowNum++;
+                }
+                
+                excelWorkbook.write(fileOutStream);
+                fileOutStream.close();
+
+            } catch (Exception ex) {
+                Logger.getLogger(SqliteDbConnector.class.getName()).log(Level.SEVERE, null, ex);
+            }                                                                
+        }
         
+        public void toDOCX(String fileName) throws SQLException {
+
+            if (resultSet == null || dbConnection == null) 
+                return;
+            
+            ResultSetMetaData metaData = resultSet.getMetaData();
+            int numberOfColumns = metaData.getColumnCount();
+            
+            System.out.println("Save as file: " + fileName);
+            try {
+                prepareFile(fileName);
+                FileOutputStream fileOutStream = new FileOutputStream(fileName);                
+                XWPFDocument wordDocument = new XWPFDocument();   
+                
+                while (resultSet.next()) {
+                    String row = "";
+                    for (int colNum=1; colNum <= numberOfColumns; colNum++) {
+                        row += String.valueOf(resultSet.getObject(colNum));
+                    }
+                    if (row.length()==0 || row == null) continue;
+                    XWPFParagraph tmpParagraph = wordDocument.createParagraph();
+                    XWPFRun tmpRun = tmpParagraph.createRun();   
+                    tmpRun.setText(row);
+                    tmpRun.setFontSize(8);
+                    tmpRun.setFontFamily("Courier New");                    
+                }                
+                wordDocument.write(fileOutStream);
+                fileOutStream.close();
+            } catch (Exception ex) {
+                Logger.getLogger(SqliteDbConnector.class.getName()).log(Level.SEVERE, null, ex);
+            }  
+
+            
+        }
     }
 }

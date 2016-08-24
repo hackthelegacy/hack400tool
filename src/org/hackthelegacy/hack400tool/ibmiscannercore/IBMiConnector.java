@@ -1,6 +1,6 @@
 //    "hack400tool"
 //    - security handling tools for IBM Power Systems (formerly known as AS/400)
-//    Copyright (C) 2010-2015  Bart Kulach
+//    Copyright (C) 2010-2016  Bart Kulach
 //    This file, IBMiConnector.java, is part of hack400tool package.
 
 //    "hack400tool" is free software: you can redistribute it and/or modify
@@ -38,9 +38,11 @@ import org.xml.sax.InputSource;
 import java.awt.Frame;
 import java.beans.PropertyVetoException;
 import java.io.BufferedReader;
+import java.io.BufferedWriter;
 import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.FileOutputStream;
+import java.io.FileWriter;
 import java.io.FilenameFilter;
 import java.io.IOException;
 import java.io.StringReader;
@@ -53,22 +55,30 @@ import java.sql.Statement;
 import java.sql.Types;
 import java.text.Format;
 import java.text.SimpleDateFormat;
+import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.Date;
 import java.util.Enumeration;
 import java.util.HashMap;
 import java.util.Hashtable;
 import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.Map;
 import java.util.Vector;
+import java.util.concurrent.ExecutionException;
 import java.util.logging.Level;
 import java.util.logging.LogRecord;
 import java.util.logging.Logger;
 import javax.swing.DefaultListModel;
 import javax.swing.Icon;
 import javax.swing.JFileChooser;
+import javax.swing.JFrame;
 import javax.swing.JTree;
 import javax.swing.ListModel;
+import javax.swing.ProgressMonitor;
+import javax.swing.SwingUtilities;
+import javax.swing.SwingWorker;
 import javax.swing.UIManager;
 import javax.swing.event.ListDataListener;
 import javax.swing.event.TreeModelListener;
@@ -94,7 +104,13 @@ public class IBMiConnector {
     private Connection JDBCConnection = null;
     private AS400JDBCDriver JDBCDriver = null;
     private AS400 JDBCSystem = null;
+    
+    private int currentTaskProgress = 0;
+    private boolean isActiveTask = false;
+    private boolean isCancelledTask = false;
 
+    private SqliteDbConnector dbTempConnection;    
+    
     private Statement JDBCStatement = null;
     
     private byte[][] userHandles = new byte[10][];
@@ -117,26 +133,28 @@ public class IBMiConnector {
     public static final int PASSWORD_HASH_FIRSTDES = 0;
     public static final int PASSWORD_HASH_SECONDDES = 1;
     public static final int PASSWORD_HASH_LMHASH = 2;
-    public static final int PASSWORD_HASH_HMACSHA1 = 3;
+    public static final int PASSWORD_HASH_HMACSHA1UC = 3;
+    public static final int PASSWORD_HASH_HMACSHA1MC = 6;
     public static final int PASSWORD_HASH_UNKNOWNHASH = 4;
     public static final int PASSWORD_HASH_ALLDATA = 5;    
     private static final int MAX_THREADS = 20;
-    private static final int SLEEP_TIME = 100; //100 milliseconds
-    private static final int MAX_SLEEP = 5000; //3 seconds
+    private static final int SLEEP_TIME = 100; 
+    private static final int MAX_SLEEP = 5000; 
     
     private static final String DEFAULT_OUTQ_NAME = "HACKOUTQ";
     private static final String DEFAULT_SPLF_NAME = "HACKSPLF";
     
-    public IBMiConnector(String serverAddress, boolean useSSL, String temporaryLibrary, String userName, String password) 
+    public IBMiConnector(String serverAddress, boolean useSSL, boolean useJDBC, boolean useGUI, boolean useSockets, boolean useNetSockets, String temporaryLibrary, String userName, String password, boolean useProxy, String proxyServer) 
             throws AS400SecurityException, IOException, 
             ErrorCompletingRequestException, InterruptedException, 
             PropertyVetoException, ObjectDoesNotExistException, SQLException{
+                
         
         if (useSSL) {
             if (userName.isEmpty() && password.isEmpty())
                 secureConnection = new SecureAS400(serverAddress);
             else
-                secureConnection = new SecureAS400(serverAddress, userName, password);
+                secureConnection = (useProxy ? new SecureAS400(serverAddress, userName, password, proxyServer) : new SecureAS400(serverAddress, userName, password));
             insecureConnection = null;
             secure = true;
         }
@@ -144,23 +162,26 @@ public class IBMiConnector {
             if (userName.isEmpty() && password.isEmpty())
                 insecureConnection = new AS400(serverAddress);
             else
-                insecureConnection = new AS400(serverAddress, userName, password);
+                insecureConnection = (useProxy ? new AS400(serverAddress, userName, password, proxyServer) : new AS400(serverAddress, userName, password));
             secureConnection = null;
             secure = false;
         }
         
-        (secure ? secureConnection : insecureConnection).setGuiAvailable(false);
-        (secure ? secureConnection : insecureConnection).setMustUseSockets(false);
-        (secure ? secureConnection : insecureConnection).setMustUseNetSockets(false);                
+        (secure ? secureConnection : insecureConnection).setGuiAvailable(useGUI);
+        (secure ? secureConnection : insecureConnection).setMustUseSockets(true);
+        (secure ? secureConnection : insecureConnection).setMustUseNetSockets(true);   
+        
+        (secure ? secureConnection : insecureConnection).connectService(AS400.SIGNON);
+        (secure ? secureConnection : insecureConnection).connectService(AS400.FILE);
+        
         
         currentJob = new Job((secure ? secureConnection : insecureConnection));
         
         String message = "User " +
-                currentJob.getStringValue(Job.CURRENT_USER) + 
                 " connected to " +
                 (secure ? secureConnection : insecureConnection).getSystemName() + 
                 ", version " + (secure ? secureConnection : insecureConnection).getVRM() +
-                ", job number " + currentJob.getStringValue(Job.JOB_NUMBER);
+                ", job number ";
         
         curLib = ((temporaryLibrary == null || temporaryLibrary.isEmpty()) ? "QTEMP" : temporaryLibrary.substring(0, (temporaryLibrary.length() < 10 ? temporaryLibrary.length() : 10)));
         Logger.getLogger(IBMiConnector.class.getName()).log(Level.INFO, message);
@@ -170,6 +191,11 @@ public class IBMiConnector {
             Logger.getLogger(IBMiConnector.class.getName()).log(Level.INFO, runCLCommand("CLRLIB LIB(" + curLib + ")"));            
         }
         
+        Logger.getLogger(IBMiConnector.class.getName()).log(Level.INFO, runCLCommand("CRTPF FILE(" + curLib + "/" + DEFAULT_SPLF_NAME + ") RCDLEN(199) MAXMBRS(*NOMAX) SIZE(*NOMAX) LVLCHK(*NO)"));
+        
+        
+        
+        if (useJDBC)
         try {
             JDBCDriver = new AS400JDBCDriver();
             DriverManager.registerDriver(JDBCDriver);
@@ -184,6 +210,22 @@ public class IBMiConnector {
         ifsTreeModel = new IFSFileTreeModel("/");
         ifsListModel = new IFSFileListModel("/");
         ifsFileTreeRenderer = new IFSFileTreeCellRenderer();                
+        
+        dbTempConnection = new SqliteDbConnector(new SimpleDateFormat("YYMMddHHmmSS").format(new Date()), true);           
+    }
+
+    public IBMiConnector(String serverAddress, boolean useSSL, boolean useJDBC, boolean useGUI, boolean useSockets, boolean useNetSockets, String temporaryLibrary, String userName, String password) 
+            throws AS400SecurityException, IOException, 
+            ErrorCompletingRequestException, InterruptedException, 
+            PropertyVetoException, ObjectDoesNotExistException, SQLException{
+        this(serverAddress, useSSL, useJDBC, useGUI, useSockets, useNetSockets, temporaryLibrary, userName, password, false, "");
+    }
+    
+    public IBMiConnector(String serverAddress, boolean useSSL, String temporaryLibrary, String userName, String password)
+            throws AS400SecurityException, IOException, 
+            ErrorCompletingRequestException, InterruptedException, 
+            PropertyVetoException, ObjectDoesNotExistException, SQLException{
+        this(serverAddress, useSSL, true, false, false, false, temporaryLibrary, userName, password);
     }
     
     public IBMiConnector(String serverAddress, boolean useSSL, String temporaryLibrary) 
@@ -203,7 +245,7 @@ public class IBMiConnector {
     
     public void disconnect() 
             throws AS400SecurityException, ErrorCompletingRequestException, 
-            IOException, InterruptedException, PropertyVetoException, SQLException{
+            IOException, InterruptedException, PropertyVetoException, SQLException, ObjectDoesNotExistException{
         if (!curLib.matches("QTEMP")) {        
             Logger.getLogger(IBMiConnector.class.getName()).log(Level.INFO, runCLCommand("CLROUTQ OUTQ(" + curLib + "/" + DEFAULT_OUTQ_NAME + ")"));
             Logger.getLogger(IBMiConnector.class.getName()).log(Level.INFO, runCLCommand("DLTOUTQ OUTQ(" + curLib + "/" + DEFAULT_OUTQ_NAME + ")"));
@@ -213,6 +255,8 @@ public class IBMiConnector {
         if (JDBCConnection  != null && !JDBCConnection.isClosed()) JDBCConnection.close();
         (secure ? secureConnection : insecureConnection).disconnectAllServices();
         Logger.getLogger(IBMiConnector.class.getName()).log(Level.INFO, "Disconnected.");
+        dbTempConnection.disconnect();
+        dbTempConnection.deleteDatabase();
     }
     
     public String getExceptionDetails(Exception ex) {
@@ -264,7 +308,18 @@ public class IBMiConnector {
         }
         return exceptionDetails;
     }
-        
+    
+    public int getCurrentTaskProgress(){
+        if (!isActiveTask)
+            return -1;
+        else
+            return currentTaskProgress;
+    }
+    
+    public void cancelCurrentTask(){
+        isCancelledTask = true;
+    }
+    
     public String APIParameterXMLStringGetSVCPGM(String XML) {
         DocumentBuilderFactory domFactory = DocumentBuilderFactory.newInstance();
         try{
@@ -375,7 +430,18 @@ public class IBMiConnector {
                 Logger.getLogger(IBMiConnector.class.getName()).log(Level.SEVERE, null, ex);
             }          
     }
-            
+
+    public void exportToXLSX2(String fileName, String tableName) throws SQLException{
+        dbTempConnection.exportXLSX(fileName, tableName);
+    }
+    
+    public void exportPhysicalFileToDOCX(String fileName, String QSYSpath) 
+            throws AS400Exception, AS400SecurityException, InterruptedException, 
+            IOException, PropertyVetoException, SQLException{
+        String tableName = getPhysicalFileMemberAsTable2(QSYSpath.replace("%CURLIB%", curLib));
+        dbTempConnection.exportDOCX(fileName, tableName);        
+    }
+    
     public void exportToDOCX(String fileName, String inputText){
         
         System.out.println("Save as file: " + fileName);
@@ -446,6 +512,19 @@ public class IBMiConnector {
         return outputString;
     }
 
+    public void getSpoolFileToDOCX(String fileName, String spoolName) 
+            throws PropertyVetoException, AS400Exception, 
+            AS400SecurityException, ErrorCompletingRequestException, 
+            IOException, InterruptedException, RequestNotSupportedException, ObjectDoesNotExistException, SQLException{
+                
+        Logger.getLogger(IBMiConnector.class.getName()).log(Level.INFO, runCLCommand("CPYSPLF FILE(" + spoolName + ") TOFILE(" + curLib + "/" + DEFAULT_SPLF_NAME + ") JOB(" +
+                                _getLastPrintJobNumber() + "/" + currentJob.getStringValue(Job.CURRENT_USER) + "/QPRTJOB) SPLNBR(*LAST)"));
+        
+        this.exportPhysicalFileToDOCX(fileName, curLib + "/" + DEFAULT_SPLF_NAME + "");
+        Logger.getLogger(IBMiConnector.class.getName()).log(Level.INFO, runCLCommand("RMVM FILE(" + curLib + "/" + DEFAULT_SPLF_NAME + ") MBR(*ALL)"));
+    }
+    
+    
     public void printSpoolFileList() 
             throws PropertyVetoException, AS400Exception, AS400SecurityException, 
             ConnectionDroppedException, ErrorCompletingRequestException, 
@@ -489,7 +568,7 @@ public class IBMiConnector {
         }
         return outputString;
     }
-        
+    
     public DefaultTableModel getPhysicalFileMemberAsTable(String QSYSpath)
             throws AS400Exception, AS400SecurityException, 
             InterruptedException, IOException, PropertyVetoException {
@@ -518,9 +597,9 @@ public class IBMiConnector {
         SequentialFile seqFile = new SequentialFile(secure ? secureConnection : insecureConnection, filePath.getPath());
      
         AS400FileRecordDescription recordDesc = new AS400FileRecordDescription(secure ? secureConnection : insecureConnection, filePath.getPath());        
-        RecordFormat[] format = recordDesc.retrieveRecordFormat();
+        RecordFormat format = recordDesc.retrieveRecordFormat()[0];
 
-        seqFile.setRecordFormat(format[0]);
+        seqFile.setRecordFormat(format);
         
         seqFile.open(SequentialFile.READ_ONLY, 10, SequentialFile.COMMIT_LOCK_LEVEL_NONE);
         
@@ -530,8 +609,8 @@ public class IBMiConnector {
         Vector rows = new Vector();
         
         columnNames.addElement("#");
-        String[] fieldNames = format[0].getFieldNames();
-        FieldDescription[] fieldDesc = format[0].getFieldDescriptions();
+        String[] fieldNames = format.getFieldNames();
+        FieldDescription[] fieldDesc = format.getFieldDescriptions();
         for (int fieldIterator=0; fieldIterator<fieldNames.length; fieldIterator++)
             columnNames.addElement((fieldDesc[fieldIterator].getTEXT() == null ? 
                     fieldNames[fieldIterator] : 
@@ -559,6 +638,83 @@ public class IBMiConnector {
         return new DefaultTableModel(rows, columnNames);
     }
 
+    public String getPhysicalFileMemberAsTable2(String QSYSpath)
+            throws AS400Exception, AS400SecurityException, 
+            InterruptedException, IOException, PropertyVetoException, SQLException {
+        String[] pathDetails = QSYSpath.split("/");
+        if (pathDetails.length != 2) return null;
+        return getPhysicalFileMemberAsTable2(pathDetails[0], pathDetails[1], "%FIRST%", 0, -1);
+    }
+    
+    public String getPhysicalFileMemberAsTable2(String libName, String fileName)
+            throws AS400Exception, AS400SecurityException, 
+            InterruptedException, IOException, PropertyVetoException, SQLException {
+        return getPhysicalFileMemberAsTable2(libName, fileName, "%FIRST%", 1, -1);        
+    }
+    
+    public String getPhysicalFileMemberAsTable2(String libName, String fileName, String memberName)
+            throws AS400Exception, AS400SecurityException, 
+            InterruptedException, IOException, PropertyVetoException, SQLException {
+        return getPhysicalFileMemberAsTable2(libName, fileName, "%FIRST%", 1, -1);        
+    }
+    
+    
+    public String getPhysicalFileMemberAsTable2(String libName, String fileName, String memberName, int rowFrom, int rowTo) 
+            throws AS400Exception, AS400SecurityException, 
+            InterruptedException, IOException, PropertyVetoException, SQLException {
+        
+        String fileTableName = "";
+        
+        QSYSObjectPathName filePath = new QSYSObjectPathName(libName.replace("%CURLIB%", curLib), fileName, memberName, "MBR");
+        SequentialFile seqFile = new SequentialFile(secure ? secureConnection : insecureConnection, filePath.getPath());
+     
+        AS400FileRecordDescription recordDesc = new AS400FileRecordDescription(secure ? secureConnection : insecureConnection, filePath.getPath());        
+        RecordFormat format = recordDesc.retrieveRecordFormat()[0];
+
+        
+        seqFile.setRecordFormat(format);
+        
+        seqFile.open(SequentialFile.READ_ONLY, 10, SequentialFile.COMMIT_LOCK_LEVEL_NONE);
+        
+        Record dataRec = null;
+        
+        Vector columnNames = new Vector();
+        Vector rows = new Vector();
+        
+        columnNames.addElement("#");
+        String[] fieldNames = format.getFieldNames();
+        FieldDescription[] fieldDesc = format.getFieldDescriptions();
+        for (int fieldIterator=0; fieldIterator<fieldNames.length; fieldIterator++)
+            columnNames.addElement((fieldDesc[fieldIterator].getTEXT() == null ? 
+                    fieldNames[fieldIterator] : 
+                    fieldDesc[fieldIterator].getTEXT() + " (" + fieldNames[fieldIterator] + ")"));       
+        
+        
+        fileTableName = dbTempConnection.createTempTable("fileTable", columnNames.size());
+        dbTempConnection.insertrow(fileTableName, columnNames);
+
+        int curRow = rowFrom;
+        if (curRow == 0)
+            curRow = 1;
+        
+        int maxRow = rowTo;
+        if (maxRow >=0 && maxRow < curRow)
+            maxRow = curRow;
+        
+        seqFile.positionCursor(curRow);
+        while (((dataRec = seqFile.readNext()) != null) && (curRow <= maxRow || maxRow == -1)) {
+            Vector newRow = new Vector();
+            newRow.addElement(String.valueOf(curRow));
+            for (int fieldNum=0; fieldNum<dataRec.getNumberOfFields();fieldNum++) {                
+                newRow.addElement(dataRec.getField(fieldNum).toString());
+            }
+            dbTempConnection.insertrow(fileTableName, newRow);
+            curRow += 1;
+        }
+        seqFile.close();
+        return fileTableName;
+    }
+        
     public void updatePhysicalFileMemberRecord(String libName, String fileName, String memberName, int recordNumber, int colNumber, Object newValue) 
             throws AS400Exception, AS400SecurityException, 
             InterruptedException, IOException, PropertyVetoException {
@@ -655,19 +811,19 @@ public class IBMiConnector {
     
     public String runCLCommand(String commandString) 
             throws AS400SecurityException, ErrorCompletingRequestException, 
-                    IOException, InterruptedException, PropertyVetoException, SQLException {
-        return _runCLCommand(commandString, CL_COMMAND_EXEC_PLAIN);
+                    IOException, InterruptedException, PropertyVetoException, SQLException, ObjectDoesNotExistException {
+        return _runCLCommand(commandString, CL_COMMAND_EXEC_PLAIN/*CL_COMMAND_EXEC_QSHELL*/);
     }
     
     public String runCLCommand(String commandString, int executionType) 
             throws AS400SecurityException, ErrorCompletingRequestException, 
-                    IOException, InterruptedException, PropertyVetoException, SQLException {
+                    IOException, InterruptedException, PropertyVetoException, SQLException, ObjectDoesNotExistException {
         return _runCLCommand(commandString, executionType);
     }
 
     public String _runCLCommand(String commandString, int executionType) 
             throws AS400SecurityException, ErrorCompletingRequestException, 
-                    IOException, InterruptedException, PropertyVetoException, SQLException {
+                    IOException, InterruptedException, PropertyVetoException, SQLException, ObjectDoesNotExistException {
        
         if (insecureConnection==null && secureConnection==null)
             return null;
@@ -688,8 +844,26 @@ public class IBMiConnector {
                 }
                 return String.valueOf(JDBCCallStatement.getUpdateCount());
             case CL_COMMAND_EXEC_QSHELL:
-                /*TODO*/
-                return null; 
+                ProgramCall qp2shell = new ProgramCall(secure ? secureConnection : insecureConnection);        
+                ProgramParameter[] qp2shellParms = new ProgramParameter[3];
+
+                
+                AS400Text char22Converter = new AS400Text(22);
+                AS400Text char3Converter = new AS400Text(3);
+                AS400Text charConverter = new AS400Text(commandToRun.length() + 10);
+
+                qp2shellParms[0] = new ProgramParameter(char22Converter.toBytes("/QOpenSys/usr/bin/csh\0"));
+                qp2shellParms[1] = new ProgramParameter(char3Converter.toBytes("-c\0"));
+                qp2shellParms[2] = new ProgramParameter(charConverter.toBytes("system \"" + commandToRun + "\"\0"));
+                qp2shell.setProgram("/qsys.lib/qp2shell.pgm", qp2shellParms);
+
+                if (!qp2shell.run())
+                {
+                    Logger.getLogger(IBMiConnector.class.getName()).log(Level.SEVERE, "Wywalilo sie");
+                    Logger.getLogger(IBMiConnector.class.getName()).log(Level.SEVERE, _stringFromAS400Message(qp2shell.getMessageList()));
+                    return null;
+                }    
+                return _stringFromAS400Message(qp2shell.getMessageList());
             case CL_COMMAND_EXEC_PLAIN: //using regular CL command call
             default:
                 CommandCall commandRun = new CommandCall(secure ? secureConnection : insecureConnection);
@@ -716,66 +890,48 @@ public class IBMiConnector {
     public DefaultListModel getEscalationUsers()
             throws AS400Exception, AS400SecurityException, 
             ErrorCompletingRequestException, InterruptedException, 
-            IOException, ObjectDoesNotExistException, RequestNotSupportedException{
+            IOException, ObjectDoesNotExistException, RequestNotSupportedException, ExecutionException{
+    
+        while (isActiveTask)
+            Thread.sleep(1);
         
-               
-        class userListThreadClass implements Runnable {
-            private DefaultListModel listModel; 
-            private ObjectDescription objectDesc;
-
-            public userListThreadClass(DefaultListModel lstModel, ObjectDescription objDesc) {
-                listModel = lstModel;
-                objectDesc = objDesc;
-            }
-
-            public void run(){
-                escalationUsersCurThreads++;
-                boolean isAuthorized = true;
-                try {
-                    String description = objectDesc.getValueAsString(ObjectDescription.TEXT_DESCRIPTION);
-                } catch (Exception ex) {
-                    isAuthorized = false;
-                }
-                if (isAuthorized) {
-                    try {
-                        String userName = objectDesc.getValueAsString(ObjectDescription.NAME);
-                        listModel.addElement(userName);
-                    } catch (Exception ex) {
-                        Logger.getAnonymousLogger().log(Level.INFO, "Error while adding row");
-                    }    
-                }
-                escalationUsersCurThreads--;
-            }
-        }
-        
+        isActiveTask = true;
+        currentTaskProgress = 0;
+        Logger.getLogger(IBMiConnector.class.getName()).log(Level.INFO, Thread.currentThread().getName());
         DefaultListModel userListModel = new DefaultListModel();
-        
+
         ObjectList objectList = new ObjectList(secure ? secureConnection : insecureConnection, 
                                                 "QSYS", "*ALL", "*USRPRF");
-        
+
         Enumeration objectsEnumeration = objectList.getObjects();
 
         int objectCounter = 0;
-        
-        while (objectsEnumeration.hasMoreElements()) {
-            ObjectDescription currentObject = (ObjectDescription)objectsEnumeration.nextElement();
-            Runnable userListRunnable = new userListThreadClass(userListModel, currentObject);
-            while (escalationUsersCurThreads > MAX_THREADS) Thread.sleep(SLEEP_TIME);
+
+        List userList = new ArrayList();
+        userList = Collections.list(objectsEnumeration);
+        int maxObjects = userList.size();
+
+        Logger.getLogger(IBMiConnector.class.getName()).log(Level.INFO, "Query running. All objects: {0}", String.valueOf(maxObjects));
+
+        for (Object curObject : userList) {
+            if (isCancelledTask){
+                isCancelledTask = false;
+                isActiveTask = false;
+                Logger.getLogger(IBMiConnector.class.getName()).log(Level.INFO, "Task cancelled");
+                return null;
+            }
             
-            new Thread(userListRunnable).start();
+            ObjectDescription currentObject = (ObjectDescription)curObject;
+            try {                
+                String description = currentObject.getValueAsString(ObjectDescription.TEXT_DESCRIPTION);
+                userListModel.addElement(currentObject.getName());                
+            } catch (Exception ex) {                
+            }
+            currentTaskProgress = (int)(100.0f * objectCounter/maxObjects);
             objectCounter++;
         }
-        Logger.getLogger(IBMiConnector.class.getName()).log(Level.INFO, "Query running. Objects counted: {0}", String.valueOf(objectCounter));
-
-        int sleepCounter = 0;
-        while (escalationUsersCurThreads > 0 && sleepCounter < MAX_SLEEP) 
-        {
-            sleepCounter += SLEEP_TIME;
-            Thread.sleep(SLEEP_TIME);                
-        }
-                        
+        isActiveTask = false;
         return userListModel;
-
     }
     
     public DefaultTableModel getObjectList(String objectName, String libraryName, String objectType)
@@ -1140,8 +1296,10 @@ public class IBMiConnector {
         switch (passType) {
             case PASSWORD_HASH_UNKNOWNHASH:
                 return hashString.substring(154,538);
-            case PASSWORD_HASH_HMACSHA1:
-                return hashString.substring(68,148);
+            case PASSWORD_HASH_HMACSHA1MC:
+                return hashString.substring(68,108);
+            case PASSWORD_HASH_HMACSHA1UC:
+                return hashString.substring(108,148);                
             case PASSWORD_HASH_LMHASH:
                 return hashString.substring(32,64);
             case PASSWORD_HASH_SECONDDES:
@@ -1516,7 +1674,144 @@ public class IBMiConnector {
         qsyrlsph.setProgram("/qsys.lib/qsyrlsph.pgm", qsyrlsphParms);                
         return qsyrlsph.run();              
     }
-       
+
+    public byte[] getProfileTokenWithoutPassword(String userName, int passType)
+            throws PropertyVetoException, AS400SecurityException, 
+                   ErrorCompletingRequestException, IOException, 
+                   InterruptedException, ObjectDoesNotExistException {  
+    
+        if (insecureConnection==null && secureConnection==null)
+            return null;
+               
+        ProgramCall qsygenpt = new ProgramCall(secure ? secureConnection : insecureConnection);        
+        ProgramParameter[] qsygenptParms = new ProgramParameter[6];
+        
+        AS400Text char10Converter = new AS400Text(10);
+        AS400Text char1Converter = new AS400Text(1);
+        AS400Bin4 bin4 = new AS400Bin4();
+
+        String userNameAS400 = userName.toUpperCase();
+        while (userNameAS400.length() < 10)
+            userNameAS400 += " ";
+        
+        String passwordAS400;
+        switch (passType) {
+            case (PASSWORD_TYPE_NOPWDCHK):
+                passwordAS400 = "*NOPWDCHK ";
+                break;
+            case (PASSWORD_TYPE_NOPWDSTS):
+                passwordAS400 = "*NOPWDSTS ";
+            default:    
+            case (PASSWORD_TYPE_NOPWD): 
+                passwordAS400 = "*NOPWD    ";
+                break;
+        }
+
+        /*
+         *  http://www-01.ibm.com/support/knowledgecenter/ssw_ibm_i_72/apis/qsygenpt.htm
+         * 
+            Required Parameter Group:
+
+            1	Profile token           Output	Char(32)
+            2	User profile name	Input	Char(10)
+            3	User password           Input	Char(*)
+            4	Time out interval	Input	Bin(4)
+            5	Profile token type	Input	Char(1)
+            6	Error code              I/O	Char(*)
+
+              Optional Parameter Group:
+
+            7	Length of user password	Input	Bin(4)
+            8	CCSID of user password	Input	Bin(4)
+         */
+              
+        qsygenptParms[0] = new ProgramParameter(32);
+        qsygenptParms[1] = new ProgramParameter(char10Converter.toBytes(userNameAS400));
+        qsygenptParms[2] = new ProgramParameter(char10Converter.toBytes(passwordAS400));
+        qsygenptParms[3] = new ProgramParameter(bin4.toBytes(new Integer(3600)));
+        qsygenptParms[4] = new ProgramParameter(char1Converter.toBytes("3"));
+        qsygenptParms[5] = new ProgramParameter(500);
+        
+        qsygenpt.setProgram("/qsys.lib/qsygenpt.pgm", qsygenptParms);  
+        
+        if (!qsygenpt.run())
+        {
+            Logger.getLogger(IBMiConnector.class.getName()).log(Level.SEVERE, _stringFromAS400Message(qsygenpt.getMessageList()));
+            return null;
+        }
+        
+        return qsygenptParms[0].getOutputData();
+    }   
+    
+    public boolean setProfileToken(byte[] profileToken)
+            throws PropertyVetoException, AS400SecurityException, 
+                   ErrorCompletingRequestException, IOException, 
+                   InterruptedException, ObjectDoesNotExistException {  
+    
+        if (insecureConnection==null && secureConnection==null)
+            return false;
+        
+        if (profileToken.length != 32) return false;
+        
+        ProgramCall qsysetpt = new ProgramCall(secure ? secureConnection : insecureConnection);        
+        ProgramParameter[] qsysetptParms = new ProgramParameter[2];
+                        
+        /*
+         *  http://www-01.ibm.com/support/knowledgecenter/ssw_ibm_i_72/apis/qsysetpt.htm
+         * 
+            Required Parameter Group for QSYSETPT:
+
+            1	Profile token	Input	Char(32)
+            2	Error code	I/O	Char(*)
+         */
+        
+        
+        
+        qsysetptParms[0] = new ProgramParameter(profileToken);
+        qsysetptParms[1] = new ProgramParameter(500);
+        
+        qsysetpt.setProgram("/qsys.lib/qsysetpt.pgm", qsysetptParms);                
+        return qsysetpt.run();              
+    }
+
+    public boolean releaseProfileToken(byte[] profileToken)
+            throws PropertyVetoException, AS400SecurityException, 
+                   ErrorCompletingRequestException, IOException, 
+                   InterruptedException, ObjectDoesNotExistException {  
+          
+        if (insecureConnection==null && secureConnection==null)
+            return false;
+        
+        if (profileToken.length != 32) return false;
+        
+        ProgramCall qsyrmvpt = new ProgramCall(secure ? secureConnection : insecureConnection);        
+        ProgramParameter[] qsyrmvptParms = new ProgramParameter[3];
+
+        AS400Text char10Converter = new AS400Text(10);
+
+        /*
+         *  http://www-01.ibm.com/support/knowledgecenter/ssw_ibm_i_72/apis/QSYRMVPT.htm?lang=en
+         * 
+            Required Parameter Group:
+
+            1	Remove option	Input	Char(10)
+            2	Error code	I/O	Char(*)
+
+            Optional Parameter:
+
+            3	Profile token	Input	Char(32)
+        
+         */
+        
+        
+        qsyrmvptParms[0] = new ProgramParameter(char10Converter.toBytes("*PRFTKN"));
+        qsyrmvptParms[1] = new ProgramParameter(500);
+        qsyrmvptParms[2] = new ProgramParameter(profileToken);
+        
+        qsyrmvpt.setProgram("/qsys.lib/qsyrmvpt.pgm", qsyrmvptParms);                
+        return qsyrmvpt.run();              
+    }
+    
     public boolean escalatePrivilegeWithoutPassword(String userName, int passType)
         throws PropertyVetoException, AS400SecurityException, 
                    ErrorCompletingRequestException, IOException, 
@@ -1649,8 +1944,6 @@ public class IBMiConnector {
         
         qsyrupwd.setProgram("/qsys.lib/qsyrupwd.pgm", qsyrupwdParms);
                 
-        qsyrupwd.run();
-        
         if (!qsyrupwd.run())
         {
             Logger.getLogger(IBMiConnector.class.getName()).log(Level.SEVERE, _stringFromAS400Message(qsyrupwd.getMessageList()));
@@ -1688,8 +1981,10 @@ public class IBMiConnector {
                 return _hexStringFromEBCDIC(char500Converter.toBytes(qsyrupwdInfo[3])).substring(2,540);            
             case PASSWORD_HASH_UNKNOWNHASH: // Unknown (hash?) data
                 return _hexStringFromEBCDIC(char500Converter.toBytes(qsyrupwdInfo[3])).substring(156,540);
-            case PASSWORD_HASH_HMACSHA1: // Pair of HMAC-SHA1 passwords (2x40 characters)
-                return _hexStringFromEBCDIC(char500Converter.toBytes(qsyrupwdInfo[3])).substring(70,150);
+            case PASSWORD_HASH_HMACSHA1MC: // HMAC-SHA1 password (mixed case)
+                return _hexStringFromEBCDIC(char500Converter.toBytes(qsyrupwdInfo[3])).substring(70,110);
+            case PASSWORD_HASH_HMACSHA1UC: // HMAC-SHA1 password (uppercase)
+                return _hexStringFromEBCDIC(char500Converter.toBytes(qsyrupwdInfo[3])).substring(110,150);
             case PASSWORD_HASH_LMHASH: // LM hash
                 return _hexStringFromEBCDIC(char500Converter.toBytes(qsyrupwdInfo[3])).substring(34,66);
             case PASSWORD_HASH_SECONDDES: // Second DES password
@@ -1713,6 +2008,46 @@ public class IBMiConnector {
         return userList.getUsers();        
         
     }    
+    
+    public void getJohnPasswordsLM(String fileName) throws IOException
+    {
+        getJohnPasswords(PASSWORD_HASH_LMHASH, fileName);
+    }
+
+    public void getJohnPasswordsSHAUpperCase(String fileName) throws IOException
+    {
+        getJohnPasswords(PASSWORD_HASH_HMACSHA1UC, fileName);
+    }
+    
+    public void getJohnPasswordsSHAMixedCase(String fileName) throws IOException
+    {
+        getJohnPasswords(PASSWORD_HASH_HMACSHA1MC, fileName);
+    }
+
+    public void getJohnPasswords(int passType, String fileName) throws IOException
+    {
+        DefaultTableModel pwdMatrix = null;
+        User curUser;
+        Enumeration allUsers;
+        String curPassword;
+        File outFile = new File(fileName);
+        
+        BufferedWriter fileWriter = new BufferedWriter(new FileWriter(outFile));
+        
+        try {
+            allUsers  = getAllUsers();
+            while (allUsers.hasMoreElements())
+            {
+                curUser = (User)allUsers.nextElement();
+                curPassword = getEncryptedPassword(curUser.getName(), passType);
+                fileWriter.write(curUser.getName() + ":" + curPassword + "\n");
+            }           
+        } catch (Exception ex) {
+            return;
+        }
+
+        fileWriter.close();                
+    }
     
     public DefaultTableModel getAuthorisationMatrix()
     {
@@ -1746,7 +2081,8 @@ public class IBMiConnector {
         columnNames.addElement("User encrypted password (DES-1 hash 1)");
         columnNames.addElement("User encrypted password (DES-1 hash 2)");
         columnNames.addElement("User encrypted password (LM Hash)");
-        columnNames.addElement("User encrypted password (SHA-1 hash)");
+        columnNames.addElement("User encrypted password (SHA-1 hash - mixed case)");
+        columnNames.addElement("User encrypted password (SHA-1 hash - uppercase)");
         columnNames.addElement("User encrypted password (unknown hash)");
         columnNames.addElement("Is password expired?");
         columnNames.addElement("Is password *NONE?");
@@ -1817,7 +2153,8 @@ public class IBMiConnector {
                 newRow.addElement(getEncryptedPasswordFromHashString(encryptedPassword, PASSWORD_HASH_FIRSTDES));
                 newRow.addElement(getEncryptedPasswordFromHashString(encryptedPassword, PASSWORD_HASH_SECONDDES));
                 newRow.addElement(getEncryptedPasswordFromHashString(encryptedPassword, PASSWORD_HASH_LMHASH));
-                newRow.addElement(getEncryptedPasswordFromHashString(encryptedPassword, PASSWORD_HASH_HMACSHA1));
+                newRow.addElement(getEncryptedPasswordFromHashString(encryptedPassword, PASSWORD_HASH_HMACSHA1MC));
+                newRow.addElement(getEncryptedPasswordFromHashString(encryptedPassword, PASSWORD_HASH_HMACSHA1UC));
                 newRow.addElement(getEncryptedPasswordFromHashString(encryptedPassword, PASSWORD_HASH_UNKNOWNHASH));
             } catch (Exception ex) {
                 Logger.getLogger(IBMiConnector.class.getName()).log(Level.SEVERE, null, ex);
@@ -1917,7 +2254,225 @@ public class IBMiConnector {
         authMatrix = new DefaultTableModel(rows,columnNames);   
         return authMatrix;
     }
-    
+
+    public String getAuthorisationMatrix2() throws SQLException
+    {
+        String authMatrixName = "";
+        
+        Vector columnNames = new Vector();
+        Vector rows = new Vector();
+        
+        User curUser;
+        User curGroup;
+        Enumeration allUsers;
+        Enumeration allGroups;
+        LinkedHashSet<String> allGroupsHashSet = new LinkedHashSet<>();
+        LinkedHashSet<String> curGroupsHashSet = new LinkedHashSet<>();
+        
+        try {
+           allUsers  = getAllUsers();
+           allGroups = getAllUsers();
+        } catch (Exception ex) {
+            return null;
+        }
+        
+        columnNames.addElement("User name");
+        columnNames.addElement("Description");
+        columnNames.addElement("Is a group profile?");
+        columnNames.addElement("User class");
+        columnNames.addElement("Status");
+        columnNames.addElement("User expiration interval");
+        columnNames.addElement("User expiration date");
+        columnNames.addElement("User expiration action");
+        columnNames.addElement("User encrypted password (DES-1 hash 1)");
+        columnNames.addElement("User encrypted password (DES-1 hash 2)");
+        columnNames.addElement("User encrypted password (LM Hash)");
+        columnNames.addElement("User encrypted password (SHA-1 hash - mixed case)");
+        columnNames.addElement("User encrypted password (SHA-1 hash - uppercase)");
+        columnNames.addElement("User encrypted password (unknown hash)");
+        columnNames.addElement("Is password expired?");
+        columnNames.addElement("Is password *NONE?");
+        columnNames.addElement("Are certificates assigned?");
+        columnNames.addElement("Password last change date");
+        columnNames.addElement("Previous sign-on date");
+        columnNames.addElement("Password expiration interval");
+        columnNames.addElement("Password expiration date");
+        columnNames.addElement("ALLOBJ");
+        columnNames.addElement("AUDIT");
+        columnNames.addElement("SECADM");
+        columnNames.addElement("JOBCTL");
+        columnNames.addElement("SPLCTL");
+        columnNames.addElement("SAVSYS");
+        columnNames.addElement("SERVICE");
+        columnNames.addElement("IOSYSCFG");
+        columnNames.addElement("Limited capabilities?");
+        columnNames.addElement("Limited device sessions?");
+        columnNames.addElement("Group profile name");
+        columnNames.addElement("Supplemental groups");
+        columnNames.addElement("Initial menu");
+        columnNames.addElement("Initial program");
+        columnNames.addElement("Attention program");
+        columnNames.addElement("Current library");
+        columnNames.addElement("Home directory");
+        columnNames.addElement("Job description");
+        columnNames.addElement("Message queue");
+        columnNames.addElement("Output queue");
+        columnNames.addElement("Print device");
+        columnNames.addElement("User action auditing level");
+        columnNames.addElement("User object auditing level");
+                
+        
+        List groupList = new ArrayList();
+        groupList = Collections.list(allGroups);
+                
+        for (Object currentGroup : groupList)
+        {
+            curGroup = (User)currentGroup;
+            if (curGroup.getGroupID() != 0) {
+                String curGroupName = curGroup.getUserProfileName();
+                allGroupsHashSet.add(curGroupName);
+                columnNames.addElement(curGroupName);
+            }
+        }
+        
+        authMatrixName = dbTempConnection.createTempTable("istmatrix", 44 + allGroupsHashSet.size());
+        
+        
+        //the first row contains column names
+        dbTempConnection.insertrow(authMatrixName, columnNames);
+        
+        while (allUsers.hasMoreElements())
+        {
+            curUser = (User)allUsers.nextElement();
+            Vector newRow = new Vector();
+            //name
+            newRow.addElement(curUser.getName().toString());
+            //description
+            newRow.addElement(curUser.getDescription().toString());
+            //isgroup
+            newRow.addElement((curUser.getGroupID()!=0 ? "true" : "false"));
+            //usrcls
+            newRow.addElement(curUser.getUserClassName().toString());
+            //status
+            newRow.addElement(curUser.getStatus().toString());
+            //expitv
+            newRow.addElement(String.valueOf(curUser.getUserExpirationInterval()));
+            //expdate
+            newRow.addElement((curUser.getUserExpirationDate() == null ? "" : curUser.getUserExpirationDate().toString()));
+            //expaction
+            newRow.addElement(curUser.getUserExpirationAction() == null ? "" : curUser.getUserExpirationAction().toString());
+            //password
+            try {
+                String encryptedPassword = getEncryptedPassword(curUser.getName(), 5);
+                
+                newRow.addElement(getEncryptedPasswordFromHashString(encryptedPassword, PASSWORD_HASH_FIRSTDES));
+                newRow.addElement(getEncryptedPasswordFromHashString(encryptedPassword, PASSWORD_HASH_SECONDDES));
+                newRow.addElement(getEncryptedPasswordFromHashString(encryptedPassword, PASSWORD_HASH_LMHASH));
+                newRow.addElement(getEncryptedPasswordFromHashString(encryptedPassword, PASSWORD_HASH_HMACSHA1MC));
+                newRow.addElement(getEncryptedPasswordFromHashString(encryptedPassword, PASSWORD_HASH_HMACSHA1UC));
+                newRow.addElement(getEncryptedPasswordFromHashString(encryptedPassword, PASSWORD_HASH_UNKNOWNHASH));
+            } catch (Exception ex) {
+                Logger.getLogger(IBMiConnector.class.getName()).log(Level.SEVERE, null, ex);
+                return null;
+            }
+            //pwdexpired
+            newRow.addElement((curUser.isPasswordSetExpire() ? "true" : "false"));
+            //pwdnone
+            newRow.addElement((curUser.isNoPassword() ? "true" : "false"));
+            //certs
+            newRow.addElement((curUser.isWithDigitalCertificates() ? "true" : "false"));
+            //pwdlastchg
+            newRow.addElement(curUser.getPasswordLastChangedDate() == null ? "" : curUser.getPasswordLastChangedDate().toString());
+            //prevsignon
+            newRow.addElement(curUser.getPreviousSignedOnDate() == null ? "" : curUser.getPreviousSignedOnDate().toString());
+            //pwdexpitv
+            newRow.addElement(String.valueOf(curUser.getPasswordExpirationInterval()));
+            //pwdexpdat
+            newRow.addElement(curUser.getPasswordExpireDate() == null ? "" : curUser.getPasswordExpireDate().toString());
+            //spcaut
+            try {                
+                //User.SPECIAL_AUTHORITY_ALL_OBJECT            
+                newRow.addElement((curUser.hasSpecialAuthority(User.SPECIAL_AUTHORITY_ALL_OBJECT) ? 
+                                                            (checkUserSpecialAuthority(curUser.getUserProfileName(), User.SPECIAL_AUTHORITY_ALL_OBJECT) ? "I" : "X") : ""));
+                //User.SPECIAL_AUTHORITY_AUDIT
+                newRow.addElement((curUser.hasSpecialAuthority(User.SPECIAL_AUTHORITY_AUDIT) ?
+                                                            (checkUserSpecialAuthority(curUser.getUserProfileName(), User.SPECIAL_AUTHORITY_AUDIT) ? "I" : "X") : ""));
+                //User.SPECIAL_AUTHORITY_SECURITY_ADMINISTRATOR
+                newRow.addElement((curUser.hasSpecialAuthority(User.SPECIAL_AUTHORITY_SECURITY_ADMINISTRATOR) ?
+                                                            (checkUserSpecialAuthority(curUser.getUserProfileName(), User.SPECIAL_AUTHORITY_SECURITY_ADMINISTRATOR) ? "I" : "X") : ""));
+                //User.SPECIAL_AUTHORITY_JOB_CONTROL
+                newRow.addElement((curUser.hasSpecialAuthority(User.SPECIAL_AUTHORITY_JOB_CONTROL) ? 
+                                                            (checkUserSpecialAuthority(curUser.getUserProfileName(), User.SPECIAL_AUTHORITY_JOB_CONTROL) ? "I" : "X") : ""));
+                //User.SPECIAL_AUTHORITY_SPOOL_CONTROL
+                newRow.addElement((curUser.hasSpecialAuthority(User.SPECIAL_AUTHORITY_SPOOL_CONTROL) ?
+                                                            (checkUserSpecialAuthority(curUser.getUserProfileName(), User.SPECIAL_AUTHORITY_SPOOL_CONTROL) ? "I" : "X") : ""));
+                //User.SPECIAL_AUTHORITY_SAVE_SYSTEM
+                newRow.addElement((curUser.hasSpecialAuthority(User.SPECIAL_AUTHORITY_SAVE_SYSTEM) ? 
+                                                            (checkUserSpecialAuthority(curUser.getUserProfileName(), User.SPECIAL_AUTHORITY_SAVE_SYSTEM) ? "I" : "X") : ""));
+                //User.SPECIAL_AUTHORITY_SERVICE
+                newRow.addElement((curUser.hasSpecialAuthority(User.SPECIAL_AUTHORITY_SERVICE) ?
+                                                            (checkUserSpecialAuthority(curUser.getUserProfileName(), User.SPECIAL_AUTHORITY_SERVICE) ? "I" : "X") : ""));
+                //User.SPECIAL_AUTHORITY_IO_SYSTEM_CONFIGURATION
+                newRow.addElement((curUser.hasSpecialAuthority(User.SPECIAL_AUTHORITY_IO_SYSTEM_CONFIGURATION) ? 
+                                                            (checkUserSpecialAuthority(curUser.getUserProfileName(), User.SPECIAL_AUTHORITY_IO_SYSTEM_CONFIGURATION) ? "I" : "X") : ""));
+            } catch (Exception ex) {
+                Logger.getLogger(IBMiConnector.class.getName()).log(Level.SEVERE, null, ex);
+            }
+
+            //lmtcpb
+            newRow.addElement(curUser.getLimitCapabilities().toString());
+            //lmtdevssn 
+            newRow.addElement(curUser.getLimitDeviceSessions().toString());
+            //grppf
+            newRow.addElement(curUser.getGroupProfileName().toString());
+            //supgrps
+            newRow.addElement((curUser.getSupplementalGroups().length == 0 ? "" : _stringFromArray(curUser.getSupplementalGroups(), " ")));
+            //inmnu
+            newRow.addElement(curUser.getInitialMenu().toString());
+            //inpgm
+            newRow.addElement(curUser.getInitialProgram().toString());
+            //attnpgm
+            newRow.addElement(curUser.getAttentionKeyHandlingProgram().toString());            
+            //curlib
+            newRow.addElement(curUser.getCurrentLibraryName().toString());
+            //homedir
+            newRow.addElement(curUser.getHomeDirectory().toString());
+            //jobd
+            newRow.addElement(curUser.getJobDescription().toString());
+            //msgq
+            newRow.addElement(curUser.getMessageQueue().toString());
+            //outq
+            newRow.addElement(curUser.getOutputQueue().toString());
+            //prtdev
+            newRow.addElement(curUser.getPrintDevice().toString());
+            //actionaudlvl
+            newRow.addElement(curUser.getUserActionAuditLevel() == null ? "" : _stringFromArray(curUser.getUserActionAuditLevel(), " "));
+            //objaudval
+            newRow.addElement(curUser.getObjectAuditingValue() == null ? "" : curUser.getObjectAuditingValue());
+
+            curGroupsHashSet.clear();
+
+            if (!curUser.getGroupProfileName().equalsIgnoreCase("*NONE"))
+                curGroupsHashSet.add(curUser.getGroupProfileName());
+
+            if (curUser.getSupplementalGroupsNumber() > 0)
+                curGroupsHashSet.addAll(Arrays.asList(curUser.getSupplementalGroups()));
+           
+            if (!curGroupsHashSet.isEmpty())
+                for (String groupName : allGroupsHashSet) {
+                    newRow.addElement((curGroupsHashSet.contains(groupName) ? "X" : ""));
+                }
+            else
+                for (int i=0; i<allGroupsHashSet.size(); i++)
+                    newRow.addElement("");
+            
+            //rows.addElement(newRow);
+            dbTempConnection.insertrow(authMatrixName, newRow);
+        }
+
+        return authMatrixName;
+    }
+
     public Enumeration getObjectPrivileges(String objectPath) 
             throws AS400Exception, AS400SecurityException, ConnectionDroppedException, 
             ErrorCompletingRequestException, InterruptedException, IOException, 
@@ -2209,7 +2764,7 @@ public class IBMiConnector {
         if (insecureConnection==null && secureConnection==null)
             return false;
         
-        ProgramCall quscrtus = new ProgramCall(secure ? secureConnection : insecureConnection);        
+        ProgramCall quscrtus=  new ProgramCall(secure ? secureConnection : insecureConnection);        
         ProgramParameter[] quscrtusParms = new ProgramParameter[6]; //only mandatory params at the moment
 
         AS400Bin4 bin4 = new AS400Bin4();      
@@ -2242,15 +2797,135 @@ public class IBMiConnector {
         quscrtusParms[0] = new ProgramParameter(char20Converter.toBytes(userSpaceName + userSpaceLib));
         quscrtusParms[1] = new ProgramParameter(char10Converter.toBytes(extendedAttribute));
         quscrtusParms[2] = new ProgramParameter(bin4.toBytes(new Integer(initialSize)));
-        quscrtusParms[3] = new ProgramParameter(char1Converter.toBytes((byte)0x00));
+        quscrtusParms[3] = new ProgramParameter(char1Converter.toBytes(new String(new byte[] {0x00})));
         quscrtusParms[4] = new ProgramParameter(char10Converter.toBytes("*EXCLUDE  "));
-        quscrtusParms[5] = new ProgramParameter(char10Converter.toBytes(userSpaceDescription));
+        quscrtusParms[5] = new ProgramParameter(char50Converter.toBytes(userSpaceDescription));
         
         quscrtus.setProgram("/qsys.lib/quscrtus.pgm", quscrtusParms);
                 
         return quscrtus.run();        
     }
+        
+    public boolean makeUserSpaceAutoExtendible(String uspcName, String uspcLibrary, boolean autoExtendible)
+            throws PropertyVetoException, AS400SecurityException, 
+                   ErrorCompletingRequestException, IOException, 
+                   InterruptedException, ObjectDoesNotExistException {
 
+        if (insecureConnection==null && secureConnection==null)
+            return false;
+        
+        ProgramCall quscusat =  new ProgramCall(secure ? secureConnection : insecureConnection);        
+        ProgramParameter[] quscusatParms = new ProgramParameter[4]; //only mandatory params at the moment
+
+        AS400Bin4 bin4 = new AS400Bin4();      
+        AS400Text char1Converter = new AS400Text(1);
+        AS400Text char10Converter = new AS400Text(10);
+        AS400Text char20Converter = new AS400Text(20);        
+        AS400Text char50Converter = new AS400Text(50);
+        
+        
+        String userSpaceName = _padTrimString(uspcName.toUpperCase(), 10);
+                
+        String userSpaceLib = _padTrimString(uspcLibrary.toUpperCase(), 10);
+                
+        AS400DataType[] paramDataType = new AS400DataType[]{
+            new AS400Bin4(),
+            new AS400Bin4(),
+            new AS400Bin4(),
+            new AS400Text(1)
+        };
+        
+        AS400Structure paramStructure = new AS400Structure(paramDataType);
+        AS400Array paramArray = new AS400Array(paramStructure, 1);
+
+        Object paramData[] = new Object[1];
+        
+        paramData[0] = new Object[]{
+            1,//bin4.toBytes(1), //Number of records
+            3,//bin4.toBytes(3), //Key
+            1,//bin4.toBytes(1), //Length of data
+            //(autoExtendible ? char1Converter.toBytes("1") : char1Converter.toBytes("0")) //data
+            (autoExtendible ? "1" : "0") //data
+        };
+
+        byte[] paramBytes = new byte[13];
+        paramBytes = paramArray.toBytes(paramData);
+        
+        quscusatParms[0] = new ProgramParameter(10);
+        quscusatParms[0].setParameterType(ProgramParameter.PASS_BY_REFERENCE);
+        quscusatParms[1] = new ProgramParameter(char20Converter.toBytes(userSpaceName + userSpaceLib));
+        quscusatParms[1].setParameterType(ProgramParameter.PASS_BY_REFERENCE);
+        quscusatParms[2] = new ProgramParameter(paramBytes);
+        quscusatParms[2].setParameterType(ProgramParameter.PASS_BY_REFERENCE);
+        byte[] errorBytes = new byte[32];
+        quscusatParms[3] = new ProgramParameter(errorBytes, 32);
+        quscusatParms[3].setParameterType(ProgramParameter.PASS_BY_REFERENCE);
+        
+        quscusat.setProgram("/qsys.lib/quscusat.pgm", quscusatParms);
+                
+        if (!quscusat.run()){
+            Logger.getLogger(IBMiConnector.class.getName()).log(Level.SEVERE, _stringFromAS400Message(quscusat.getMessageList()));
+            return false;
+        }
+        return true;
+    }
+
+    public int getUserSpaceLength(String uspcName, String uspcLibrary)
+            throws PropertyVetoException, AS400SecurityException, 
+                   ErrorCompletingRequestException, IOException, 
+                   InterruptedException, ObjectDoesNotExistException {
+
+        if (insecureConnection==null && secureConnection==null)
+            return -1;
+        
+        ProgramCall qusrusat =  new ProgramCall(secure ? secureConnection : insecureConnection);        
+        ProgramParameter[] qusrusatParms = new ProgramParameter[5]; //only mandatory params at the moment
+
+        AS400Bin4 bin4 = new AS400Bin4();      
+        AS400Text char1Converter = new AS400Text(1);
+        AS400Text char10Converter = new AS400Text(10);
+        AS400Text char20Converter = new AS400Text(20);        
+        AS400Text char8Converter = new AS400Text(8);
+        
+        
+        String userSpaceName = _padTrimString(uspcName.toUpperCase(), 10);
+                
+        String userSpaceLib = _padTrimString(uspcLibrary.toUpperCase(), 10);
+                
+        
+        qusrusatParms[0] = new ProgramParameter(24);
+        qusrusatParms[0].setParameterType(ProgramParameter.PASS_BY_REFERENCE);
+        qusrusatParms[1] = new ProgramParameter(bin4.toBytes(24));
+        qusrusatParms[1].setParameterType(ProgramParameter.PASS_BY_REFERENCE);
+        qusrusatParms[2] = new ProgramParameter(char8Converter.toBytes("SPCA0100"));
+        qusrusatParms[2].setParameterType(ProgramParameter.PASS_BY_REFERENCE);
+        qusrusatParms[3] = new ProgramParameter(char20Converter.toBytes(userSpaceName + userSpaceLib));
+        qusrusatParms[3].setParameterType(ProgramParameter.PASS_BY_REFERENCE);        
+        byte[] errorBytes = new byte[32];
+        qusrusatParms[4] = new ProgramParameter(errorBytes, 32);
+        qusrusatParms[4].setParameterType(ProgramParameter.PASS_BY_REFERENCE);
+        
+        qusrusat.setProgram("/qsys.lib/qusrusat.pgm", qusrusatParms);
+                
+        if (!qusrusat.run()) {
+            Logger.getLogger(IBMiConnector.class.getName()).log(Level.SEVERE, _stringFromAS400Message(qusrusat.getMessageList()));
+            return -1;
+        }
+        
+        AS400DataType[] returnArrayType = new AS400DataType[6]; //SPCA0100 format
+        returnArrayType[0] = new AS400Bin4();
+        returnArrayType[1] = new AS400Bin4();
+        returnArrayType[2] = new AS400Bin4();
+        returnArrayType[3] = new AS400Text(1);
+        returnArrayType[4] = new AS400Text(1);
+        returnArrayType[5] = new AS400Text(1);
+      
+        AS400Structure returnedDataConverter = new AS400Structure(returnArrayType);
+        Object[] returnedArray = (Object[]) returnedDataConverter.toObject(qusrusatParms[0].getOutputData(), 0);
+        return (Integer)(returnedArray[2]);
+    }
+
+    
     public boolean deleteUserSpace(String uspcName, String uspcLibrary)
             throws PropertyVetoException, AS400SecurityException, 
                    ErrorCompletingRequestException, IOException, 
@@ -2350,6 +3025,312 @@ public class IBMiConnector {
         return quschgus.run();        
     }
 
+    public String retrieveUserSpace(String uspcName, String uspcLibrary, AS400DataType[] fieldFormat)
+            throws PropertyVetoException, AS400SecurityException, 
+                   ErrorCompletingRequestException, IOException, 
+                   InterruptedException, ObjectDoesNotExistException, SQLException {
+        
+        return retrieveUserSpace(uspcName, uspcLibrary, fieldFormat, 0);
+        
+    }
+    
+    public Object[] getUserSpaceHeaderData(String uspcName, String uspcLibrary)
+            throws PropertyVetoException, AS400SecurityException, 
+                   ErrorCompletingRequestException, IOException, 
+                   InterruptedException, ObjectDoesNotExistException, SQLException {
+        
+        ProgramCall qusrtvus = new ProgramCall(secure ? secureConnection : insecureConnection);        
+        ProgramParameter[] qusrtvusParms = new ProgramParameter[4]; //only mandatory params at the moment
+
+        AS400Bin4 bin4 = new AS400Bin4();      
+        AS400Text char20Converter = new AS400Text(20);        
+
+        String userSpaceName = _padTrimString(uspcName.toUpperCase(), 10);
+
+        String userSpaceLib = _padTrimString(uspcLibrary.toUpperCase(), 10);
+
+
+        qusrtvusParms[0] = new ProgramParameter(char20Converter.toBytes(userSpaceName + userSpaceLib));
+        qusrtvusParms[0].setParameterType(ProgramParameter.PASS_BY_REFERENCE);
+        qusrtvusParms[1] = new ProgramParameter(bin4.toBytes(125));           
+        qusrtvusParms[1].setParameterType(ProgramParameter.PASS_BY_REFERENCE);
+        qusrtvusParms[2] = new ProgramParameter(bin4.toBytes(16));           
+        qusrtvusParms[2].setParameterType(ProgramParameter.PASS_BY_REFERENCE);
+        qusrtvusParms[3] = new ProgramParameter(16);           
+        qusrtvusParms[3].setParameterType(ProgramParameter.PASS_BY_REFERENCE);
+        qusrtvus.setProgram("/qsys.lib/qusrtvus.pgm", qusrtvusParms);
+        if (!qusrtvus.run()) {
+            Logger.getLogger(IBMiConnector.class.getName()).log(Level.SEVERE, _stringFromAS400Message(qusrtvus.getMessageList()));
+            return null;
+            }
+
+        //https://www.ibm.com/support/knowledgecenter/en/ssw_ibm_i_71/apiref/usfexample.htm
+        //Offset +7C
+        AS400DataType[] headerFormat = new AS400DataType[]{
+            new AS400Bin4(), //Offset to list data section
+            new AS400Bin4(), //List data section size
+            new AS400Bin4(), //Number of list entries
+            new AS400Bin4() //Size of each entry
+        };
+        
+        AS400Structure returnedDataConverter = new AS400Structure(headerFormat);
+        return (Object[]) returnedDataConverter.toObject(qusrtvusParms[3].getOutputData(), 0);            
+    }
+    
+    public String retrieveUserSpace(String uspcName, String uspcLibrary, AS400DataType[] fieldFormat, int skipHeaderBytes)
+            throws PropertyVetoException, AS400SecurityException, 
+                   ErrorCompletingRequestException, IOException, 
+                   InterruptedException, ObjectDoesNotExistException, SQLException {
+
+        /*
+        Note:
+            fieldFormat defines how many fields are included (fieldFormat.length) and what is their length (every byte).
+            Since the data is converted to String and put into a database, it is up to the external function to 
+            interpret the data from the database.
+        */
+        String dbUserSpaceName = "";        
+        
+        int userSpaceLength = getUserSpaceLength(uspcName, uspcLibrary);
+        int fieldLength = _sumDataTypeFields(fieldFormat);
+        
+        if ((insecureConnection==null && secureConnection==null) || 
+             fieldLength == 0 || userSpaceLength <=0 || userSpaceLength < fieldLength )
+            return dbUserSpaceName;
+
+        dbUserSpaceName = dbTempConnection.createTempTable(uspcName+uspcLibrary, fieldFormat.length);
+        
+        Object[] offsetData = getUserSpaceHeaderData(uspcName, uspcLibrary);
+        int dataOffset = (Integer)offsetData[0];
+        int maxRecords = (userSpaceLength - dataOffset) / fieldLength;
+        for (int curRecord=0; curRecord<maxRecords; curRecord++) {
+            ProgramCall qusrtvus = new ProgramCall(secure ? secureConnection : insecureConnection);        
+            ProgramParameter[] qusrtvusParms = new ProgramParameter[4]; //only mandatory params at the moment
+
+            AS400Bin4 bin4 = new AS400Bin4();      
+            AS400Text char20Converter = new AS400Text(20);        
+
+            String userSpaceName = _padTrimString(uspcName.toUpperCase(), 10);
+
+            String userSpaceLib = _padTrimString(uspcLibrary.toUpperCase(), 10);
+
+
+            qusrtvusParms[0] = new ProgramParameter(char20Converter.toBytes(userSpaceName + userSpaceLib));
+            qusrtvusParms[0].setParameterType(ProgramParameter.PASS_BY_REFERENCE);
+            qusrtvusParms[1] = new ProgramParameter(bin4.toBytes((curRecord*fieldLength)+1+dataOffset));           
+            qusrtvusParms[1].setParameterType(ProgramParameter.PASS_BY_REFERENCE);
+            qusrtvusParms[2] = new ProgramParameter(bin4.toBytes(fieldLength));           
+            qusrtvusParms[2].setParameterType(ProgramParameter.PASS_BY_REFERENCE);
+            qusrtvusParms[3] = new ProgramParameter(fieldLength);           
+            qusrtvusParms[3].setParameterType(ProgramParameter.PASS_BY_REFERENCE);
+            qusrtvus.setProgram("/qsys.lib/qusrtvus.pgm", qusrtvusParms);
+            if (!qusrtvus.run()) {
+                Logger.getLogger(IBMiConnector.class.getName()).log(Level.SEVERE, _stringFromAS400Message(qusrtvus.getMessageList()));
+                return "";
+            }
+            
+            AS400Structure returnedDataConverter = new AS400Structure(fieldFormat);
+            Object[] returnedArray = (Object[]) returnedDataConverter.toObject(qusrtvusParms[3].getOutputData(), 0);
+            if (returnedArray.length != fieldFormat.length) {
+                Logger.getLogger(IBMiConnector.class.getName()).log(Level.SEVERE, "Received data format does not match.");
+                return "";
+            }
+            
+            Vector arrayData = new Vector();
+            
+            for (Object arrayElement : returnedArray)
+                arrayData.addElement(arrayElement);
+            
+            dbTempConnection.insertrow(dbUserSpaceName, arrayData);
+        }
+        
+        return dbUserSpaceName;
+    }
+    
+    
+    public String getPTFs2() 
+            throws PropertyVetoException, AS400SecurityException, 
+            ErrorCompletingRequestException, IOException, InterruptedException, 
+            ObjectDoesNotExistException, SQLException{
+
+        String dbPTFName = "";
+        try {
+            while (isActiveTask)
+                Thread.sleep(1);
+            
+            createUserSpace("ALLPTFS", curLib, "ALLPTFS", 64000, "PTF user space");
+            if (!makeUserSpaceAutoExtendible("ALLPTFS", curLib, true))
+                return dbPTFName;
+
+            String userSpaceName = _padTrimString("ALLPTFS   " + curLib.toUpperCase(), 20);
+            
+            ProductList productList = new ProductList(secure ? secureConnection : insecureConnection);
+            Product[] products = productList.getProducts();
+
+            isActiveTask = true;
+            currentTaskProgress = 0;
+            
+            int maxObjects = products.length;
+            int objectCounter = 0;
+            for (Product product : products) {
+                //product.
+                
+                if (!(product.isInstalled() || product.isSupported() || product.isLoadInError()))
+                {
+                    currentTaskProgress = (int)(100.0f * objectCounter/maxObjects);
+                    objectCounter++;
+                    continue;
+                }                        
+                
+                if (isCancelledTask){
+                    isCancelledTask = false;
+                    isActiveTask = false;
+                    Logger.getLogger(IBMiConnector.class.getName()).log(Level.INFO, "Task cancelled");
+                    return null;
+                }
+                String productDescription = _padTrimString(product.getProductID(), 7) +
+                                            _padTrimString("*ALL", 6) +
+                                            _padTrimString("*ALL", 4) +
+                                            _padTrimString("*ALL", 10) +
+                                            "0" + "0" + new String(new byte[] {0x00,0x00,0x00,0x00,0x00,
+                                                                               0x00,0x00,0x00,0x00,0x00,
+                                                                               0x00,0x00,0x00,0x00,0x00,
+                                                                               0x00,0x00,0x00,0x00,0x00,0x00});
+                
+                        ProgramParameter[] qpzlstfxParms = new ProgramParameter[4];
+
+                        AS400Text char8Converter = new AS400Text(8);
+                        AS400Text char20Converter = new AS400Text(20);        
+                        AS400Text char50Converter = new AS400Text(50);       
+                        AS400Bin4 bin4 = new AS400Bin4();                                                                        
+                                                
+                        qpzlstfxParms[0] = new ProgramParameter(char20Converter.toBytes(userSpaceName));
+                        qpzlstfxParms[0].setParameterType(ProgramParameter.PASS_BY_REFERENCE);
+                        qpzlstfxParms[1] = new ProgramParameter(char50Converter.toBytes(productDescription));
+                        qpzlstfxParms[1].setParameterType(ProgramParameter.PASS_BY_REFERENCE);
+                        qpzlstfxParms[2] = new ProgramParameter(char8Converter.toBytes("PTFL0100"));
+                        qpzlstfxParms[2].setParameterType(ProgramParameter.PASS_BY_REFERENCE);
+                        byte[] errorBytes = new byte[32];
+                        qpzlstfxParms[3] = new ProgramParameter(errorBytes, 32);
+                        qpzlstfxParms[3].setParameterType(ProgramParameter.PASS_BY_REFERENCE);
+
+                        ServiceProgramCall qpzlstfx = new ServiceProgramCall(secure ? secureConnection : insecureConnection,
+                                                                            "/qsys.lib/qpzlstfx.srvpgm", "QpzListPTF",
+                                                                            ServiceProgramCall.NO_RETURN_VALUE, qpzlstfxParms);                                
+                        if (!qpzlstfx.run()) {                            
+                            Logger.getLogger(IBMiConnector.class.getName()).log(Level.INFO, _stringFromAS400Message(qpzlstfx.getMessageList()));
+                        }
+                        currentTaskProgress = (int)(100.0f * objectCounter/maxObjects);
+                        objectCounter++;                        
+            }                                                
+        } catch (Exception ex) {
+            Logger.getLogger(IBMiConnector.class.getName()).log(Level.SEVERE, null, ex);
+        }
+
+        isActiveTask = false;
+    
+        /*
+
+            Input Parameter Section
+
+            Offset	Type	Field
+            Dec	Hex
+            0	0	CHAR(10)	User space name specified
+            10	A	CHAR(10)	User space library name specified
+            20	14	CHAR(50)	Product information
+            70	46	CHAR(8)	Format name
+
+
+            Header Section
+
+            Offset	Type	Field
+            Dec	Hex
+            0	0	CHAR(10)	User space name used
+            10	A	CHAR(10)	User space library name used
+            20	14	CHAR(1)	Current IPL source
+            21	15	CHAR(1)	Current server IPL source
+            22	16	CHAR(1)	Server firmware status
+
+
+            PTFL0100 Format List Section
+
+            Offset	Type	Field
+            Dec	Hex
+            0	0	CHAR(7)	PTF ID
+            7	7	CHAR(6)	Release level of the PTF
+            13	D	CHAR(4)	Product option of the PTF
+            17	11	CHAR(4)	Product load of the PTF
+            21	15	CHAR(1)	Loaded status
+            22	16	CHAR(1)	Save file status
+            23	17	CHAR(1)	Cover letter status
+            24	18	CHAR(1)	On-order status
+            25	19	CHAR(1)	IPL action
+            26	1A	CHAR(1)	Action pending
+            27	1B	CHAR(1)	Action required
+            28	1C	CHAR(1)	IPL required
+            29	1D	CHAR(1)	PTF is released
+            30	1E	CHAR(2)	Minimum level
+            32	20	CHAR(2)	Maximum level
+            34	22	CHAR(13)	Status date and time
+            47	2F	CHAR(7)	Superseded by PTF ID
+            54	36	CHAR(1)	Server IPL required
+            55	37	CHAR(13) Creation date and time
+            68	44	CHAR(1)	Technology refresh PTF --> V7R1 onwards
+                    
+
+        */
+        
+        AS400DataType[] ptfDataTypeV6R1 = new AS400DataType[]{
+            new AS400Text(7),
+            new AS400Text(6),
+            new AS400Text(4),
+            new AS400Text(4),
+            new AS400Text(1),
+            new AS400Text(1),
+            new AS400Text(1),
+            new AS400Text(1),
+            new AS400Text(1),
+            new AS400Text(1),
+            new AS400Text(1),
+            new AS400Text(1),
+            new AS400Text(1),
+            new AS400Text(2),
+            new AS400Text(2),
+            new AS400Text(13),
+            new AS400Text(7),
+            new AS400Text(1),            
+            new AS400Text(13)
+        };  
+        
+        AS400DataType[] ptfDataTypeV7R1 = new AS400DataType[]{
+            new AS400Text(7),
+            new AS400Text(6),
+            new AS400Text(4),
+            new AS400Text(4),
+            new AS400Text(1),
+            new AS400Text(1),
+            new AS400Text(1),
+            new AS400Text(1),
+            new AS400Text(1),
+            new AS400Text(1),
+            new AS400Text(1),
+            new AS400Text(1),
+            new AS400Text(1),
+            new AS400Text(2),
+            new AS400Text(2),
+            new AS400Text(13),
+            new AS400Text(7),
+            new AS400Text(1),            
+            new AS400Text(13),
+            new AS400Text(1)
+        };
+
+        if ((secure ? secureConnection : insecureConnection).getVersion() == 7)
+           return retrieveUserSpace("ALLPTFS", curLib, ptfDataTypeV7R1, 101);
+        else if ((secure ? secureConnection : insecureConnection).getVersion() == 6)
+           return retrieveUserSpace("ALLPTFS", curLib, ptfDataTypeV6R1, 101);
+        else return "";
+    }
+                      
     public TreeModel getIFSTreeModel(){
         return (TreeModel)ifsTreeModel;
     }
@@ -2569,7 +3550,18 @@ public class IBMiConnector {
         Format format = new SimpleDateFormat("yyyy MM dd HH:mm:ss");
         return format.format(date);
     }
-    
+
+    private String _padTrimString(String inputString, int len){
+        String outputString = inputString;
+        if (outputString.length() > len)
+            return outputString.substring(0, len-1);
+        
+        while (outputString.length() < len)
+            outputString += " ";
+        
+        return outputString;
+    }
+            
     private String _stringFromAS400Message(AS400Message[] message){
         String outputString = "";
         if (message.length == 0) return "";
@@ -2600,6 +3592,31 @@ public class IBMiConnector {
         }
         return new String(outputChars);
     }    
+
+    private int _sumDataTypeFields(AS400DataType[] dataTypeArray) {
+        if (dataTypeArray.length == 0)
+            return 0;
+    
+        int dataTypeSum = 0;
+        
+        for (AS400DataType arrayElement : dataTypeArray)
+            dataTypeSum += arrayElement.getByteLength();
+        
+        return dataTypeSum;
+    }
+
+    
+    private int _sumBytes(byte[] byteArray) {
+        if (byteArray.length == 0)
+            return 0;
+    
+        int byteSum = 0;
+        
+        for (byte arrayElement : byteArray)
+            byteSum += arrayElement;
+        
+        return byteSum;
+    }
     
     private String _getLastPrintJobNumber() 
             throws PropertyVetoException, AS400SecurityException, 

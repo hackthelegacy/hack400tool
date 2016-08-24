@@ -1,6 +1,6 @@
 //    "hack400tool"
 //    - security handling tools for IBM Power Systems (formerly known as AS/400)
-//    Copyright (C) 2010-2015  Bart Kulach
+//    Copyright (C) 2010-2016  Bart Kulach
 //    This file, ScanUI.java, is part of hack400tool package.
 
 //    "hack400tool" is free software: you can redistribute it and/or modify
@@ -19,6 +19,8 @@ package org.hackthelegacy.hack400tool.ibmiscannergui;
 
 import org.hackthelegacy.hack400tool.ibmiscannercore.TextAreaOutputStream;
 import com.ibm.as400.access.ObjectList;
+import java.beans.PropertyChangeEvent;
+import java.beans.PropertyChangeListener;
 import org.hackthelegacy.hack400tool.ibmiscannercore.IBMiConnector;
 import org.hackthelegacy.hack400tool.ibmiscannercore.SqliteDbConnector;
 import java.io.ByteArrayOutputStream;
@@ -31,9 +33,11 @@ import java.util.logging.FileHandler;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 import java.util.logging.SimpleFormatter;
+import javax.swing.DefaultComboBoxModel;
 import javax.swing.JFileChooser;
 import javax.swing.JOptionPane;
 import javax.swing.SwingUtilities;
+import javax.swing.SwingWorker;
 import javax.swing.table.DefaultTableModel;
 
 public class ScanUI extends javax.swing.JFrame {
@@ -41,7 +45,6 @@ public class ScanUI extends javax.swing.JFrame {
     private IBMiConnector testSystem;
     public SqliteDbConnector dbConnection;
     private ByteArrayOutputStream bstdout, bstderr;
-    //private PrintStream stdout, stderr;
     private PrintStream stdouterr;
     private String jarPath;
     private File jarFile;
@@ -111,12 +114,25 @@ public class ScanUI extends javax.swing.JFrame {
         jScrollPane2 = new javax.swing.JScrollPane();
         logTextArea = new javax.swing.JTextArea();
         jLabel11 = new javax.swing.JLabel();
+        useJDBC = new javax.swing.JCheckBox();
+        jLabel1 = new javax.swing.JLabel();
+        escalateToComboBox = new javax.swing.JComboBox();
+        escalateButton = new javax.swing.JButton();
+        DeescalateButton = new javax.swing.JButton();
+        escalateToTextField = new javax.swing.JTextField();
+        useGUI = new javax.swing.JCheckBox();
+        useSockets = new javax.swing.JCheckBox();
+        useNetSockets = new javax.swing.JCheckBox();
+        proxyTextField = new javax.swing.JTextField();
+        useProxy = new javax.swing.JCheckBox();
+        jLabel3 = new javax.swing.JLabel();
+        jButton1 = new javax.swing.JButton();
+        createSubfolderCheckBox = new javax.swing.JCheckBox();
 
         setDefaultCloseOperation(javax.swing.WindowConstants.EXIT_ON_CLOSE);
         setBackground(new java.awt.Color(255, 255, 255));
         setCursor(new java.awt.Cursor(java.awt.Cursor.DEFAULT_CURSOR));
-        setPreferredSize(new java.awt.Dimension(800, 600));
-        setResizable(false);
+        setPreferredSize(new java.awt.Dimension(900, 650));
         addWindowListener(new java.awt.event.WindowAdapter() {
             public void windowClosing(java.awt.event.WindowEvent evt) {
                 formWindowClosing(evt);
@@ -124,6 +140,7 @@ public class ScanUI extends javax.swing.JFrame {
         });
 
         jPanel1.setBackground(new java.awt.Color(255, 255, 255));
+        jPanel1.setPreferredSize(new java.awt.Dimension(900, 650));
 
         jLabel2.setText("IP address or DNS name:");
 
@@ -211,106 +228,204 @@ public class ScanUI extends javax.swing.JFrame {
 
         jLabel11.setText("Log:");
 
+        useJDBC.setText("Use JDBC");
+
+        jLabel1.setText("Escalate to:");
+
+        escalateButton.setText("Escalate");
+        escalateButton.setEnabled(false);
+        escalateButton.addActionListener(new java.awt.event.ActionListener() {
+            public void actionPerformed(java.awt.event.ActionEvent evt) {
+                escalateButtonActionPerformed(evt);
+            }
+        });
+
+        DeescalateButton.setText("Deescalate");
+        DeescalateButton.setEnabled(false);
+        DeescalateButton.addActionListener(new java.awt.event.ActionListener() {
+            public void actionPerformed(java.awt.event.ActionEvent evt) {
+                DeescalateButtonActionPerformed(evt);
+            }
+        });
+
+        escalateToTextField.setText("QSECOFR");
+
+        useGUI.setText("Use login GUI");
+
+        useSockets.setText("Use Sockets");
+
+        useNetSockets.setText("Use NetSockets");
+
+        useProxy.setText("Use proxy");
+
+        jLabel3.setText("Proxy IP or DNS:");
+
+        jButton1.setText("Refresh");
+        jButton1.addActionListener(new java.awt.event.ActionListener() {
+            public void actionPerformed(java.awt.event.ActionEvent evt) {
+                jButton1ActionPerformed(evt);
+            }
+        });
+
+        createSubfolderCheckBox.setSelected(true);
+        createSubfolderCheckBox.setText("Create new subfolder for the scanned machine (folder name = system name)");
+
         javax.swing.GroupLayout jPanel1Layout = new javax.swing.GroupLayout(jPanel1);
         jPanel1.setLayout(jPanel1Layout);
         jPanel1Layout.setHorizontalGroup(
             jPanel1Layout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
             .addGroup(jPanel1Layout.createSequentialGroup()
-                .addGroup(jPanel1Layout.createParallelGroup(javax.swing.GroupLayout.Alignment.TRAILING)
+                .addGap(18, 18, 18)
+                .addGroup(jPanel1Layout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
                     .addGroup(jPanel1Layout.createSequentialGroup()
+                        .addComponent(createSubfolderCheckBox)
+                        .addGap(0, 0, Short.MAX_VALUE))
+                    .addComponent(jScrollPane2)
+                    .addGroup(javax.swing.GroupLayout.Alignment.TRAILING, jPanel1Layout.createSequentialGroup()
                         .addGroup(jPanel1Layout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
-                            .addGroup(jPanel1Layout.createSequentialGroup()
-                                .addGap(97, 97, 97)
-                                .addComponent(jLabel9))
                             .addGroup(javax.swing.GroupLayout.Alignment.TRAILING, jPanel1Layout.createSequentialGroup()
-                                .addContainerGap()
-                                .addComponent(jLabel2)))
-                        .addGap(18, 18, 18)
+                                .addComponent(jLabel9)
+                                .addGap(18, 18, 18)
+                                .addComponent(userNameField, javax.swing.GroupLayout.PREFERRED_SIZE, 117, javax.swing.GroupLayout.PREFERRED_SIZE))
+                            .addGroup(jPanel1Layout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
+                                .addGroup(javax.swing.GroupLayout.Alignment.TRAILING, jPanel1Layout.createSequentialGroup()
+                                    .addGroup(jPanel1Layout.createParallelGroup(javax.swing.GroupLayout.Alignment.TRAILING)
+                                        .addComponent(jLabel2)
+                                        .addComponent(jLabel3))
+                                    .addGap(18, 18, 18)
+                                    .addGroup(jPanel1Layout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING, false)
+                                        .addComponent(proxyTextField)
+                                        .addComponent(systemName, javax.swing.GroupLayout.DEFAULT_SIZE, 117, Short.MAX_VALUE)))
+                                .addGroup(jPanel1Layout.createSequentialGroup()
+                                    .addComponent(useProxy)
+                                    .addGap(41, 41, 41)
+                                    .addGroup(jPanel1Layout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
+                                        .addComponent(useSockets)
+                                        .addComponent(useSSL))))
+                            .addComponent(useGUI))
+                        .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED)
                         .addGroup(jPanel1Layout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
-                            .addComponent(userNameField, javax.swing.GroupLayout.PREFERRED_SIZE, 117, javax.swing.GroupLayout.PREFERRED_SIZE)
-                            .addComponent(systemName, javax.swing.GroupLayout.PREFERRED_SIZE, 117, javax.swing.GroupLayout.PREFERRED_SIZE)
-                            .addComponent(useSSL))
+                            .addComponent(useJDBC)
+                            .addComponent(useNetSockets))
+                        .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED, 81, Short.MAX_VALUE)
                         .addGroup(jPanel1Layout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
                             .addGroup(jPanel1Layout.createSequentialGroup()
-                                .addGap(57, 57, 57)
+                                .addGap(39, 39, 39)
                                 .addComponent(jLabel10))
                             .addGroup(jPanel1Layout.createSequentialGroup()
-                                .addGap(18, 18, 18)
-                                .addComponent(jLabel8)
+                                .addGroup(jPanel1Layout.createParallelGroup(javax.swing.GroupLayout.Alignment.TRAILING)
+                                    .addComponent(jLabel1)
+                                    .addComponent(jLabel8)
+                                    .addComponent(jButton1))
                                 .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.UNRELATED)
                                 .addGroup(jPanel1Layout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING, false)
                                     .addComponent(passwordField)
-                                    .addComponent(temporaryLibTextField, javax.swing.GroupLayout.DEFAULT_SIZE, 195, Short.MAX_VALUE))))
-                        .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED, 83, Short.MAX_VALUE)
-                        .addGroup(jPanel1Layout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
-                            .addComponent(connectButton, javax.swing.GroupLayout.Alignment.TRAILING, javax.swing.GroupLayout.PREFERRED_SIZE, 97, javax.swing.GroupLayout.PREFERRED_SIZE)
-                            .addComponent(disconnectButton, javax.swing.GroupLayout.Alignment.TRAILING, javax.swing.GroupLayout.PREFERRED_SIZE, 97, javax.swing.GroupLayout.PREFERRED_SIZE)))
-                    .addGroup(jPanel1Layout.createSequentialGroup()
-                        .addGap(18, 18, 18)
+                                    .addComponent(temporaryLibTextField)
+                                    .addComponent(escalateToComboBox, 0, javax.swing.GroupLayout.DEFAULT_SIZE, Short.MAX_VALUE)
+                                    .addComponent(escalateToTextField, javax.swing.GroupLayout.PREFERRED_SIZE, 195, javax.swing.GroupLayout.PREFERRED_SIZE))))
+                        .addGap(42, 42, 42)
                         .addGroup(jPanel1Layout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING, false)
-                            .addComponent(jLabel11)
-                            .addComponent(jScrollPane2, javax.swing.GroupLayout.PREFERRED_SIZE, 755, javax.swing.GroupLayout.PREFERRED_SIZE)
-                            .addComponent(jLabel7)
-                            .addComponent(jLabel6)
+                            .addComponent(DeescalateButton, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, Short.MAX_VALUE)
+                            .addComponent(connectButton, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, Short.MAX_VALUE)
+                            .addComponent(disconnectButton, javax.swing.GroupLayout.DEFAULT_SIZE, 97, Short.MAX_VALUE)
+                            .addComponent(escalateButton, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, Short.MAX_VALUE)))
+                    .addGroup(javax.swing.GroupLayout.Alignment.TRAILING, jPanel1Layout.createSequentialGroup()
+                        .addGroup(jPanel1Layout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
+                            .addGroup(jPanel1Layout.createSequentialGroup()
+                                .addGroup(jPanel1Layout.createParallelGroup(javax.swing.GroupLayout.Alignment.TRAILING)
+                                    .addComponent(outputDirFolderTextField, javax.swing.GroupLayout.Alignment.LEADING)
+                                    .addComponent(jScrollPane1))
+                                .addGap(42, 42, 42))
                             .addGroup(jPanel1Layout.createSequentialGroup()
                                 .addGroup(jPanel1Layout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
-                                    .addComponent(jScrollPane1)
-                                    .addComponent(outputDirFolderTextField))
-                                .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.UNRELATED)
-                                .addGroup(jPanel1Layout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
-                                    .addComponent(browseDirsButton, javax.swing.GroupLayout.Alignment.TRAILING, javax.swing.GroupLayout.PREFERRED_SIZE, 97, javax.swing.GroupLayout.PREFERRED_SIZE)
-                                    .addComponent(selectAllButton, javax.swing.GroupLayout.Alignment.TRAILING, javax.swing.GroupLayout.PREFERRED_SIZE, 97, javax.swing.GroupLayout.PREFERRED_SIZE)
-                                    .addComponent(deselectAllButton, javax.swing.GroupLayout.Alignment.TRAILING, javax.swing.GroupLayout.PREFERRED_SIZE, 97, javax.swing.GroupLayout.PREFERRED_SIZE)
-                                    .addComponent(scanButton, javax.swing.GroupLayout.Alignment.TRAILING, javax.swing.GroupLayout.PREFERRED_SIZE, 97, javax.swing.GroupLayout.PREFERRED_SIZE))))))
-                .addContainerGap(24, Short.MAX_VALUE))
+                                    .addComponent(jLabel11)
+                                    .addComponent(jLabel7)
+                                    .addComponent(jLabel6))
+                                .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED, javax.swing.GroupLayout.DEFAULT_SIZE, Short.MAX_VALUE)))
+                        .addGroup(jPanel1Layout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
+                            .addGroup(jPanel1Layout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
+                                .addComponent(deselectAllButton, javax.swing.GroupLayout.Alignment.TRAILING, javax.swing.GroupLayout.PREFERRED_SIZE, 97, javax.swing.GroupLayout.PREFERRED_SIZE)
+                                .addComponent(scanButton, javax.swing.GroupLayout.Alignment.TRAILING, javax.swing.GroupLayout.PREFERRED_SIZE, 97, javax.swing.GroupLayout.PREFERRED_SIZE))
+                            .addComponent(browseDirsButton, javax.swing.GroupLayout.PREFERRED_SIZE, 97, javax.swing.GroupLayout.PREFERRED_SIZE)
+                            .addComponent(selectAllButton, javax.swing.GroupLayout.Alignment.TRAILING, javax.swing.GroupLayout.PREFERRED_SIZE, 97, javax.swing.GroupLayout.PREFERRED_SIZE))))
+                .addContainerGap())
         );
-
-        jPanel1Layout.linkSize(javax.swing.SwingConstants.HORIZONTAL, new java.awt.Component[] {systemName, userNameField});
-
         jPanel1Layout.setVerticalGroup(
             jPanel1Layout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
             .addGroup(jPanel1Layout.createSequentialGroup()
                 .addGap(19, 19, 19)
-                .addGroup(jPanel1Layout.createParallelGroup(javax.swing.GroupLayout.Alignment.BASELINE)
-                    .addComponent(userNameField, javax.swing.GroupLayout.PREFERRED_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.PREFERRED_SIZE)
-                    .addComponent(jLabel9)
-                    .addComponent(jLabel10)
-                    .addComponent(passwordField, javax.swing.GroupLayout.PREFERRED_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.PREFERRED_SIZE)
-                    .addComponent(connectButton))
-                .addGap(24, 24, 24)
-                .addGroup(jPanel1Layout.createParallelGroup(javax.swing.GroupLayout.Alignment.BASELINE)
-                    .addComponent(systemName, javax.swing.GroupLayout.PREFERRED_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.PREFERRED_SIZE)
-                    .addComponent(jLabel2)
-                    .addComponent(jLabel8)
-                    .addComponent(temporaryLibTextField, javax.swing.GroupLayout.PREFERRED_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.PREFERRED_SIZE)
-                    .addComponent(disconnectButton))
-                .addGap(8, 8, 8)
-                .addComponent(useSSL)
-                .addGap(18, 18, 18)
                 .addGroup(jPanel1Layout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
                     .addGroup(jPanel1Layout.createSequentialGroup()
-                        .addComponent(jLabel6)
+                        .addComponent(connectButton)
                         .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED)
-                        .addComponent(outputDirFolderTextField, javax.swing.GroupLayout.PREFERRED_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.PREFERRED_SIZE))
+                        .addComponent(disconnectButton)
+                        .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.UNRELATED)
+                        .addComponent(escalateButton)
+                        .addGap(4, 4, 4)
+                        .addComponent(DeescalateButton))
                     .addGroup(jPanel1Layout.createSequentialGroup()
-                        .addGap(22, 22, 22)
-                        .addComponent(browseDirsButton)))
+                        .addGroup(jPanel1Layout.createParallelGroup(javax.swing.GroupLayout.Alignment.BASELINE)
+                            .addComponent(jLabel10)
+                            .addComponent(passwordField, javax.swing.GroupLayout.PREFERRED_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.PREFERRED_SIZE))
+                        .addGap(25, 25, 25)
+                        .addGroup(jPanel1Layout.createParallelGroup(javax.swing.GroupLayout.Alignment.BASELINE)
+                            .addComponent(jLabel8)
+                            .addComponent(temporaryLibTextField, javax.swing.GroupLayout.PREFERRED_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.PREFERRED_SIZE))
+                        .addGap(8, 8, 8)
+                        .addGroup(jPanel1Layout.createParallelGroup(javax.swing.GroupLayout.Alignment.BASELINE)
+                            .addComponent(jLabel1)
+                            .addComponent(escalateToTextField, javax.swing.GroupLayout.PREFERRED_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.PREFERRED_SIZE))
+                        .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED)
+                        .addGroup(jPanel1Layout.createParallelGroup(javax.swing.GroupLayout.Alignment.BASELINE)
+                            .addComponent(escalateToComboBox, javax.swing.GroupLayout.PREFERRED_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.PREFERRED_SIZE)
+                            .addComponent(jButton1)))
+                    .addGroup(jPanel1Layout.createSequentialGroup()
+                        .addGap(2, 2, 2)
+                        .addGroup(jPanel1Layout.createParallelGroup(javax.swing.GroupLayout.Alignment.BASELINE)
+                            .addComponent(userNameField, javax.swing.GroupLayout.PREFERRED_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.PREFERRED_SIZE)
+                            .addComponent(jLabel9))
+                        .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED)
+                        .addGroup(jPanel1Layout.createParallelGroup(javax.swing.GroupLayout.Alignment.BASELINE)
+                            .addComponent(systemName, javax.swing.GroupLayout.PREFERRED_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.PREFERRED_SIZE)
+                            .addComponent(jLabel2))
+                        .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED)
+                        .addGroup(jPanel1Layout.createParallelGroup(javax.swing.GroupLayout.Alignment.BASELINE)
+                            .addComponent(proxyTextField, javax.swing.GroupLayout.PREFERRED_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.PREFERRED_SIZE)
+                            .addComponent(jLabel3))
+                        .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED)
+                        .addGroup(jPanel1Layout.createParallelGroup(javax.swing.GroupLayout.Alignment.BASELINE)
+                            .addComponent(useSSL)
+                            .addComponent(useJDBC)
+                            .addComponent(useProxy))
+                        .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.UNRELATED)
+                        .addGroup(jPanel1Layout.createParallelGroup(javax.swing.GroupLayout.Alignment.BASELINE)
+                            .addComponent(useGUI)
+                            .addComponent(useSockets)
+                            .addComponent(useNetSockets))))
+                .addGap(18, 18, 18)
+                .addComponent(jLabel6)
+                .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED)
+                .addGroup(jPanel1Layout.createParallelGroup(javax.swing.GroupLayout.Alignment.BASELINE)
+                    .addComponent(outputDirFolderTextField, javax.swing.GroupLayout.PREFERRED_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.PREFERRED_SIZE)
+                    .addComponent(browseDirsButton))
+                .addGap(1, 1, 1)
+                .addComponent(createSubfolderCheckBox)
                 .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.UNRELATED)
                 .addComponent(jLabel7)
                 .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED)
                 .addGroup(jPanel1Layout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING, false)
-                    .addComponent(jScrollPane1, javax.swing.GroupLayout.PREFERRED_SIZE, 187, javax.swing.GroupLayout.PREFERRED_SIZE)
                     .addGroup(jPanel1Layout.createSequentialGroup()
                         .addComponent(selectAllButton)
-                        .addGap(18, 18, 18)
+                        .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.UNRELATED)
                         .addComponent(deselectAllButton)
                         .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED, javax.swing.GroupLayout.DEFAULT_SIZE, Short.MAX_VALUE)
-                        .addComponent(scanButton)))
+                        .addComponent(scanButton))
+                    .addComponent(jScrollPane1, javax.swing.GroupLayout.PREFERRED_SIZE, 187, javax.swing.GroupLayout.PREFERRED_SIZE))
                 .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED)
                 .addComponent(jLabel11)
                 .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED)
-                .addComponent(jScrollPane2, javax.swing.GroupLayout.PREFERRED_SIZE, 107, javax.swing.GroupLayout.PREFERRED_SIZE)
-                .addContainerGap(20, Short.MAX_VALUE))
+                .addComponent(jScrollPane2, javax.swing.GroupLayout.DEFAULT_SIZE, 170, Short.MAX_VALUE)
+                .addContainerGap())
         );
 
         javax.swing.GroupLayout layout = new javax.swing.GroupLayout(getContentPane());
@@ -321,9 +436,7 @@ public class ScanUI extends javax.swing.JFrame {
         );
         layout.setVerticalGroup(
             layout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
-            .addGroup(layout.createSequentialGroup()
-                .addComponent(jPanel1, javax.swing.GroupLayout.PREFERRED_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.PREFERRED_SIZE)
-                .addGap(0, 0, Short.MAX_VALUE))
+            .addComponent(jPanel1, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, Short.MAX_VALUE)
         );
 
         pack();
@@ -352,19 +465,46 @@ public class ScanUI extends javax.swing.JFrame {
     }//GEN-LAST:event_disconnectButtonActionPerformed
 
     private void connectButtonActionPerformed(java.awt.event.ActionEvent evt) {//GEN-FIRST:event_connectButtonActionPerformed
-        try {
-            String passwordString = new String(passwordField.getPassword());
-            testSystem = new IBMiConnector(systemName.getText(), useSSL.isSelected(),
-                temporaryLibTextField.getText(), userNameField.getText(),
-                passwordString);
-        } catch (Exception ex) {
-            Logger.getLogger(ScanUI.class.getName()).log(Level.SEVERE, null, ex);
-            return;
-        }
-        disconnectButton.setEnabled(true);
-        connectButton.setEnabled(false);
-        if (settingsTable.getSelectedRowCount() > 0)
-        scanButton.setEnabled(true);
+        final SwingWorker<Void, Void> mySwingWorker = new SwingWorker<Void, Void>() {
+            @Override
+            protected Void doInBackground() throws Exception {
+                try {
+                    connectButton.setEnabled(false);
+                    String passwordString = new String(passwordField.getPassword());
+                    if (useProxy.isSelected()) {
+                        testSystem = new IBMiConnector(systemName.getText(), useSSL.isSelected(), useJDBC.isSelected(), 
+                                useGUI.isSelected(), useSockets.isSelected(), useNetSockets.isSelected(),
+                            temporaryLibTextField.getText(), userNameField.getText(),
+                            passwordString, true, proxyTextField.getText());
+                    }
+                    else {            
+                        testSystem = new IBMiConnector(systemName.getText(), useSSL.isSelected(), useJDBC.isSelected(), 
+                                useGUI.isSelected(), useSockets.isSelected(), useNetSockets.isSelected(),
+                            temporaryLibTextField.getText(), userNameField.getText(),
+                            passwordString);
+                    }
+                } catch (Exception ex) {
+                    Logger.getLogger(ScanUI.class.getName()).log(Level.SEVERE, null, ex);
+                    connectButton.setEnabled(true);
+                    return null;
+                }
+                disconnectButton.setEnabled(true);
+                connectButton.setEnabled(false);
+                if (settingsTable.getSelectedRowCount() > 0)
+                scanButton.setEnabled(true);
+                escalateButton.setEnabled(true);        
+
+                return null;
+            }
+        };
+
+        mySwingWorker.addPropertyChangeListener(new PropertyChangeListener() {
+           public void propertyChange(PropertyChangeEvent evt) {
+           }
+        });
+        mySwingWorker.execute();
+
+        
     }//GEN-LAST:event_connectButtonActionPerformed
 
     private void deselectAllButtonActionPerformed(java.awt.event.ActionEvent evt) {//GEN-FIRST:event_deselectAllButtonActionPerformed
@@ -386,6 +526,7 @@ public class ScanUI extends javax.swing.JFrame {
     private void browseDirsButtonActionPerformed(java.awt.event.ActionEvent evt) {//GEN-FIRST:event_browseDirsButtonActionPerformed
         JFileChooser fileChooser = new JFileChooser();
         fileChooser.setDialogTitle("Specify a file to save");
+        fileChooser.setSelectedFile(new File(outputDirFolderTextField.getText()));
         fileChooser.setFileSelectionMode(JFileChooser.DIRECTORIES_ONLY);
         fileChooser.setMultiSelectionEnabled(false);
 
@@ -411,137 +552,195 @@ public class ScanUI extends javax.swing.JFrame {
         SHELLCMD + STMF_BIN,STMF_TEXT: output_params::=/path/to/file
         SHELLCMD + STDOUT: output_params::=<null>
         */
-
         if (settingsTable.getSelectedRowCount() < 1 || outputDirFolderTextField.getText() == "") {
             JOptionPane.showMessageDialog(null, "The path is not correct or no scan settings were selected!", "InfoBox", JOptionPane.INFORMATION_MESSAGE);
             return;
         }
 
+        String outputDirectory = (createSubfolderCheckBox.isSelected() ? 
+                                    outputDirFolderTextField.getText() + File.separator + systemName.getText() : 
+                                    outputDirFolderTextField.getText());
+        
         scanButton.setEnabled(false);
-        Thread runThread = new Thread() {
-            public void run() {
-                Logger.getLogger(ScanUI.class.getName()).log(Level.INFO, "Initializing scan...");
+        final SwingWorker<Void, Void> mySwingWorker = new SwingWorker<Void, Void>() {
+            @Override
+            protected Void doInBackground() throws Exception {
                 try {
-                    for (int selectedRow : settingsTable.getSelectedRows()) {
-                        DefaultTableModel detailSettings = dbConnection.query(
-                            "SELECT function_type, function_call, num_input_params, input_params,"
-                            + "output_type, output_params, output_filename FROM settingdetails WHERE id='"
-                            + settingsTable.getModel().getValueAt(selectedRow, 0).toString() + "'").toTableModel();
-                        if (detailSettings.getRowCount() < 1) {
-                            JOptionPane.showMessageDialog(null, "Error occured while getting details of scan parameters from the database", "InfoBox", JOptionPane.INFORMATION_MESSAGE);
-                            return;
-                        }
-                        //statusWindow.addDebugText(
-                            Logger.getLogger(ScanUI.class.getName()).log(Level.INFO, "Running scan: "
-                                + (String)settingsTable.getModel().getValueAt(selectedRow, 1));
-                            switch (((String)detailSettings.getValueAt(0, 0)).toUpperCase()) /*function_type*/ {
-                                case "CLCMD":
-                                //TODO: parse input parameters on outfile!
-                                //statusWindow.addDebugText(
-                                    Logger.getLogger(ScanUI.class.getName()).log(Level.INFO, "Running command " + (String)detailSettings.getValueAt(0, 1));
-                                    String outputMessages = testSystem.runCLCommand(
-                                        (String)detailSettings.getValueAt(0, 1) +
-                                        ((int)detailSettings.getValueAt(0, 2) == 0 ? "" :
-                                            (" " + (String)detailSettings.getValueAt(0, 3)))); /*function_call*/
-                                    //statusWindow.addDebugText(outputMessages);
-                                    Logger.getLogger(ScanUI.class.getName()).log(Level.INFO, outputMessages);
-                                    switch (((String)detailSettings.getValueAt(0, 4)).toUpperCase()) /*output_type*/{
-                                        case "PRINT": /*output_params*/
-                                        testSystem.exportToDOCX(outputDirFolderTextField.getText() + File.separator + 
-                                            (String)detailSettings.getValueAt(0, 6),
-                                            testSystem.getSpoolFile((String)detailSettings.getValueAt(0, 5)));
-                                        break;
-                                        case "OUTFILE":
-                                        testSystem.exportToXLSX(outputDirFolderTextField.getText() + File.separator + 
-                                            (String)detailSettings.getValueAt(0, 6),
-                                            testSystem.getPhysicalFileMemberAsTable((String)detailSettings.getValueAt(0, 5)));
-                                        break;
-                                        case "STMF_TEXT":
-                                        testSystem.exportToDOCX(outputDirFolderTextField.getText() + File.separator + 
-                                            (String)detailSettings.getValueAt(0, 6),
-                                            testSystem.getIFSTextFile((String)detailSettings.getValueAt(0, 5)));
-                                        break;
-                                        case "STMF_BIN":
-                                        testSystem.exportToBinaryFile(outputDirFolderTextField.getText() + File.separator + 
-                                            (String)detailSettings.getValueAt(0, 6),
-                                            testSystem.getIFSBinaryFile((String)detailSettings.getValueAt(0, 5)));
-                                        break;
-                                        default:
-                                        testSystem.exportToDOCX(outputDirFolderTextField.getText() + File.separator + 
-                                            (String)detailSettings.getValueAt(0, 6),
-                                            outputMessages);
-                                        break;
+                    Thread runThread = new Thread() {
+                        public void run() {
+                            Logger.getLogger(ScanUI.class.getName()).log(Level.INFO, "Initializing scan...");
+                            try {
+                                for (int selectedRow : settingsTable.getSelectedRows()) {
+                                    DefaultTableModel detailSettings = dbConnection.query(
+                                        "SELECT function_type, function_call, num_input_params, input_params,"
+                                        + "output_type, output_params, output_filename FROM settingdetails WHERE id='"
+                                        + settingsTable.getModel().getValueAt(selectedRow, 0).toString() + "'").toTableModel();
+                                    if (detailSettings.getRowCount() < 1) {
+                                        JOptionPane.showMessageDialog(null, "Error occured while getting details of scan parameters from the database", "InfoBox", JOptionPane.INFORMATION_MESSAGE);
+                                        return;
                                     }
-                                    break;
-                                    case "SHELLCMD":
-                                        /*TODO*/
-                                    break;
-                                    case "METHOD":
-                                    //statusWindow.addDebugText(
-                                        Logger.getLogger(ScanUI.class.getName()).log(Level.INFO, "Running method " + (String)detailSettings.getValueAt(0, 1));
-                                        switch ((String)detailSettings.getValueAt(0, 1)) {
-                                            case "getAuthorisationMatrix":
-                                            testSystem.exportToXLSX(outputDirFolderTextField.getText() + File.separator + 
-                                                (String)detailSettings.getValueAt(0, 6),
-                                                testSystem.getAuthorisationMatrix());
-                                            break;
-                                            case "getAllSystemValues":
-                                            testSystem.exportToXLSX(outputDirFolderTextField.getText() + File.separator + 
-                                                (String)detailSettings.getValueAt(0, 6),
-                                                testSystem.getAllSystemValues());
-                                            break;
-                                            case "getAllAuthorisationLists":
-                                            testSystem.exportToXLSX(outputDirFolderTextField.getText() + File.separator + 
-                                                (String)detailSettings.getValueAt(0, 6),
-                                                testSystem.getAllAuthorisationLists());
-                                            break;
-                                            case "getAllLibraries":
-                                            testSystem.exportToXLSX(outputDirFolderTextField.getText() + File.separator + 
-                                                (String)detailSettings.getValueAt(0, 6),
-                                                testSystem.getAllLibraries());
-                                            break;
-                                            case "getAllQSYSCommands":
-                                            testSystem.exportToXLSX(outputDirFolderTextField.getText() + File.separator + 
-                                                (String)detailSettings.getValueAt(0, 6),
-                                                testSystem.getAllQSYSCommands());
-                                            break;
-                                            case "getAllFolderFiles":
-                                            testSystem.exportToXLSX(outputDirFolderTextField.getText() + File.separator + 
-                                                (String)detailSettings.getValueAt(0, 6),
-                                                testSystem.getAuthoritiesForObjects(ObjectList.ALL, (String)detailSettings.getValueAt(0, 3), "*FILE"));
-                                            break;
-                                            case "getPhysicalFile":
-                                            testSystem.exportToXLSX(outputDirFolderTextField.getText() + File.separator + 
-                                                (String)detailSettings.getValueAt(0, 6),
-                                                testSystem.getPhysicalFileMemberAsTable((String)detailSettings.getValueAt(0, 3)));
-                                            break;
-                                            default:
-                                            break;
+                                        Logger.getLogger(ScanUI.class.getName()).log(Level.INFO, "Running scan: "
+                                            + (String)settingsTable.getModel().getValueAt(selectedRow, 1));
+                                        switch (((String)detailSettings.getValueAt(0, 0)).toUpperCase()) /*function_type*/ {
+                                            case "CLCMD":
+                                                Logger.getLogger(ScanUI.class.getName()).log(Level.INFO, "Running command " + (String)detailSettings.getValueAt(0, 1));
+                                                String outputMessages = testSystem.runCLCommand(
+                                                    (String)detailSettings.getValueAt(0, 1) +
+                                                    ((int)detailSettings.getValueAt(0, 2) == 0 ? "" :
+                                                        (" " + (String)detailSettings.getValueAt(0, 3)))); /*function_call*/
+                                                Logger.getLogger(ScanUI.class.getName()).log(Level.INFO, outputMessages);
+                                                switch (((String)detailSettings.getValueAt(0, 4)).toUpperCase()) /*output_type*/{
+                                                    case "PRINT": /*output_params*/
+                                                    testSystem.getSpoolFileToDOCX(outputDirectory + File.separator + 
+                                                        (String)detailSettings.getValueAt(0, 6),
+                                                        (String)detailSettings.getValueAt(0, 5));
+                                                    break;
+                                                    case "OUTFILE":
+                                                    testSystem.exportToXLSX2(outputDirectory + File.separator + 
+                                                        (String)detailSettings.getValueAt(0, 6),
+                                                        testSystem.getPhysicalFileMemberAsTable2((String)detailSettings.getValueAt(0, 5)));
+                                                    break;
+                                                    case "STMF_TEXT":
+                                                    testSystem.exportToDOCX(outputDirectory + File.separator + 
+                                                        (String)detailSettings.getValueAt(0, 6),
+                                                        testSystem.getIFSTextFile((String)detailSettings.getValueAt(0, 5)));
+                                                    break;
+                                                    case "STMF_BIN":
+                                                    testSystem.exportToBinaryFile(outputDirectory + File.separator + 
+                                                        (String)detailSettings.getValueAt(0, 6),
+                                                        testSystem.getIFSBinaryFile((String)detailSettings.getValueAt(0, 5)));
+                                                    break;
+                                                    default:
+                                                    testSystem.exportToDOCX(outputDirectory + File.separator + 
+                                                        (String)detailSettings.getValueAt(0, 6),
+                                                        outputMessages);
+                                                    break;
+                                                }
+                                                break;
+                                                case "SHELLCMD":
+                                                    /*Not supported yet*/
+                                                break;
+                                                case "METHOD":
+                                                    Logger.getLogger(ScanUI.class.getName()).log(Level.INFO, "Running method " + (String)detailSettings.getValueAt(0, 1));
+                                                    switch ((String)detailSettings.getValueAt(0, 1)) {
+                                                        case "getAuthorisationMatrix":
+                                                            testSystem.exportToXLSX2(outputDirectory + File.separator + 
+                                                            (String)detailSettings.getValueAt(0, 6),
+                                                            testSystem.getAuthorisationMatrix2());
+                                                        break;
+                                                        case "getAllSystemValues":
+                                                        testSystem.exportToXLSX(outputDirectory + File.separator + 
+                                                            (String)detailSettings.getValueAt(0, 6),
+                                                            testSystem.getAllSystemValues());
+                                                        break;
+                                                        case "getAllAuthorisationLists":
+                                                        testSystem.exportToXLSX(outputDirectory + File.separator + 
+                                                            (String)detailSettings.getValueAt(0, 6),
+                                                            testSystem.getAllAuthorisationLists());
+                                                        break;
+                                                        case "getAllLibraries":
+                                                        testSystem.exportToXLSX(outputDirectory + File.separator + 
+                                                            (String)detailSettings.getValueAt(0, 6),
+                                                            testSystem.getAllLibraries());
+                                                        break;
+                                                        case "getAllQSYSCommands":
+                                                        testSystem.exportToXLSX(outputDirectory + File.separator + 
+                                                            (String)detailSettings.getValueAt(0, 6),
+                                                            testSystem.getAllQSYSCommands());
+                                                        break;
+                                                        case "getAllFolderFiles":
+                                                        testSystem.exportToXLSX(outputDirectory + File.separator + 
+                                                            (String)detailSettings.getValueAt(0, 6),
+                                                            testSystem.getAuthoritiesForObjects(ObjectList.ALL, (String)detailSettings.getValueAt(0, 3), "*FILE"));
+                                                        break;
+                                                        case "getPhysicalFile":
+                                                        testSystem.exportToXLSX(outputDirectory + File.separator + 
+                                                            (String)detailSettings.getValueAt(0, 6),
+                                                            testSystem.getPhysicalFileMemberAsTable((String)detailSettings.getValueAt(0, 3)));
+                                                        break;
+                                                        case "getJohnPasswordsLM":
+                                                        testSystem.getJohnPasswordsLM(outputDirectory + File.separator + 
+                                                            systemName.getText() + (String)detailSettings.getValueAt(0, 6));
+                                                        break;
+                                                        case "getJohnPasswordsSHAUpperCase":
+                                                        testSystem.getJohnPasswordsSHAUpperCase(outputDirectory + File.separator + 
+                                                            systemName.getText() + (String)detailSettings.getValueAt(0, 6));
+                                                        break;
+                                                        case "getJohnPasswordsSHAMixedCase":
+                                                        testSystem.getJohnPasswordsSHAMixedCase(outputDirectory + File.separator + 
+                                                            systemName.getText() + (String)detailSettings.getValueAt(0, 6));
+                                                        break;
+                                                        case "getPTFs":
+                                                            testSystem.exportToXLSX2(outputDirectory + File.separator + 
+                                                            (String)detailSettings.getValueAt(0, 6),
+                                                            testSystem.getPTFs2());
+                                                        break;
+                                                        default:
+                                                        break;
+                                                    }
+                                                    default:
+                                                    case "API":
+                                                    break;
+                                                }
+                                                    Logger.getLogger(ScanUI.class.getName()).log(Level.INFO, "Done ("
+                                                        + (String)settingsTable.getModel().getValueAt(selectedRow, 1) + ")");
+                                                }
+
+                                                Logger.getLogger(ScanUI.class.getName()).log(Level.INFO, "Test finished. Check directory "
+                                                    + outputDirectory + " for output files.");
+
+                                                testSystem.exportToDOCX(outputDirectory + File.separator + "joblog.docx",
+                                                    testSystem.getJobLog()
+                                                    + "\n\nSTDOUT + STDERR:\n\n" + logTextArea.getText());
+
+                                                scanButton.setEnabled(true);
+                                            } catch (Exception ex) {
+                                                Logger.getLogger(ScanUI.class.getName()).log(Level.SEVERE, null, ex);
+                                            }
                                         }
-                                        default:
-                                        case "API":
-                                        break;
-                                    }
-                                    //statusWindow.addDebugText(
-                                        Logger.getLogger(ScanUI.class.getName()).log(Level.INFO, "Done ("
-                                            + (String)settingsTable.getModel().getValueAt(selectedRow, 1) + ")");
-                                    }
-
-                                    Logger.getLogger(ScanUI.class.getName()).log(Level.INFO, "Test finished. Check directory "
-                                        + outputDirFolderTextField.getText() + " for output files.");
-
-                                    testSystem.exportToDOCX(outputDirFolderTextField.getText() + File.separator + "joblog.docx",
-                                        testSystem.getJobLog()
-                                        + "\n\nSTDOUT + STDERR:\n\n" + logTextArea.getText());
-
-                                    scanButton.setEnabled(true);
-                                } catch (Exception ex) {
-                                    Logger.getLogger(ScanUI.class.getName()).log(Level.SEVERE, null, ex);
-                                }
-                            }
                         };
-                        runThread.start();
+                    runThread.start();
+                } catch (Exception ex) {
+                    Logger.getLogger(HackUI.class.getName()).log(Level.SEVERE, null, ex);
+                    connectButton.setEnabled(true);
+                    disconnectButton.setEnabled(false);
+                }                    
+                return null;
+            }
+        };
+
+        mySwingWorker.addPropertyChangeListener(new PropertyChangeListener() {
+            public void propertyChange(PropertyChangeEvent evt) {
+            }
+        });
+        mySwingWorker.execute();
+
     }//GEN-LAST:event_scanButtonActionPerformed
+
+    private void escalateButtonActionPerformed(java.awt.event.ActionEvent evt) {//GEN-FIRST:event_escalateButtonActionPerformed
+        try {
+            DeescalateButton.setEnabled(testSystem.escalatePrivilegeWithoutPassword(escalateToTextField.getText(), IBMiConnector.PASSWORD_TYPE_NOPWD));
+        } catch (Exception ex) {
+            Logger.getLogger(HackUI.class.getName()).log(Level.SEVERE, null, ex);
+        }
+        
+    }//GEN-LAST:event_escalateButtonActionPerformed
+
+    private void DeescalateButtonActionPerformed(java.awt.event.ActionEvent evt) {//GEN-FIRST:event_DeescalateButtonActionPerformed
+        try {
+            DeescalateButton.setEnabled(testSystem.deescalatePrivileges());       
+        } catch (Exception ex) {
+            Logger.getLogger(HackUI.class.getName()).log(Level.SEVERE, null, ex);
+        }
+    }//GEN-LAST:event_DeescalateButtonActionPerformed
+
+    private void jButton1ActionPerformed(java.awt.event.ActionEvent evt) {//GEN-FIRST:event_jButton1ActionPerformed
+        try {
+            escalateToComboBox.setModel(new DefaultComboBoxModel(testSystem.getEscalationUsers().toArray()));
+        } catch (Exception ex) {
+            Logger.getLogger(HackUI.class.getName()).log(Level.SEVERE, null, ex);
+        }
+    }//GEN-LAST:event_jButton1ActionPerformed
 
     /**
      * @param args the command line arguments
@@ -570,7 +769,7 @@ public class ScanUI extends javax.swing.JFrame {
         }
         //</editor-fold>
         //</editor-fold>
-
+        
         /* Create and display the form */
         java.awt.EventQueue.invokeLater(new Runnable() {
             public void run() {
@@ -583,13 +782,21 @@ public class ScanUI extends javax.swing.JFrame {
         });
 }
     // Variables declaration - do not modify//GEN-BEGIN:variables
+    private javax.swing.JButton DeescalateButton;
     private javax.swing.JButton browseDirsButton;
     private javax.swing.JButton connectButton;
+    private javax.swing.JCheckBox createSubfolderCheckBox;
     private javax.swing.JButton deselectAllButton;
     private javax.swing.JButton disconnectButton;
+    private javax.swing.JButton escalateButton;
+    private javax.swing.JComboBox escalateToComboBox;
+    private javax.swing.JTextField escalateToTextField;
+    private javax.swing.JButton jButton1;
+    private javax.swing.JLabel jLabel1;
     private javax.swing.JLabel jLabel10;
     private javax.swing.JLabel jLabel11;
     private javax.swing.JLabel jLabel2;
+    private javax.swing.JLabel jLabel3;
     private javax.swing.JLabel jLabel6;
     private javax.swing.JLabel jLabel7;
     private javax.swing.JLabel jLabel8;
@@ -600,12 +807,18 @@ public class ScanUI extends javax.swing.JFrame {
     private javax.swing.JTextArea logTextArea;
     private javax.swing.JTextField outputDirFolderTextField;
     private javax.swing.JPasswordField passwordField;
+    private javax.swing.JTextField proxyTextField;
     private javax.swing.JButton scanButton;
     private javax.swing.JButton selectAllButton;
     private javax.swing.JTable settingsTable;
     private javax.swing.JTextField systemName;
     private javax.swing.JTextField temporaryLibTextField;
+    private javax.swing.JCheckBox useGUI;
+    private javax.swing.JCheckBox useJDBC;
+    private javax.swing.JCheckBox useNetSockets;
+    private javax.swing.JCheckBox useProxy;
     private javax.swing.JCheckBox useSSL;
+    private javax.swing.JCheckBox useSockets;
     private javax.swing.JTextField userNameField;
     // End of variables declaration//GEN-END:variables
 }
