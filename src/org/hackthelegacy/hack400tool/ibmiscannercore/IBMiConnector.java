@@ -1981,9 +1981,9 @@ public class IBMiConnector {
                 return _hexStringFromEBCDIC(char500Converter.toBytes(qsyrupwdInfo[3])).substring(2,540);            
             case PASSWORD_HASH_UNKNOWNHASH: // Unknown (hash?) data
                 return _hexStringFromEBCDIC(char500Converter.toBytes(qsyrupwdInfo[3])).substring(156,540);
-            case PASSWORD_HASH_HMACSHA1MC: // HMAC-SHA1 password (mixed case)
+            case PASSWORD_HASH_HMACSHA1UC: // HMAC-SHA1 password (mixed case)
                 return _hexStringFromEBCDIC(char500Converter.toBytes(qsyrupwdInfo[3])).substring(70,110);
-            case PASSWORD_HASH_HMACSHA1UC: // HMAC-SHA1 password (uppercase)
+            case PASSWORD_HASH_HMACSHA1MC: // HMAC-SHA1 password (uppercase)
                 return _hexStringFromEBCDIC(char500Converter.toBytes(qsyrupwdInfo[3])).substring(110,150);
             case PASSWORD_HASH_LMHASH: // LM hash
                 return _hexStringFromEBCDIC(char500Converter.toBytes(qsyrupwdInfo[3])).substring(34,66);
@@ -2040,7 +2040,7 @@ public class IBMiConnector {
             {
                 curUser = (User)allUsers.nextElement();
                 curPassword = getEncryptedPassword(curUser.getName(), passType);
-                fileWriter.write(curUser.getName() + ":" + curPassword + "\n");
+                fileWriter.write(curUser.getName() + ":$as400ssha1$" + curPassword + "$" + curUser.getName() + "\n");
             }           
         } catch (Exception ex) {
             return;
