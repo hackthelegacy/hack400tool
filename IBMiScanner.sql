@@ -35,5 +35,6 @@ INSERT INTO `settingdetails` VALUES (25,NULL,NULL,'SECURITY: Get all QSYS comman
 INSERT INTO `settingdetails` VALUES (26,NULL,NULL,'SECURITY: Get John the Ripper hashes (LM hash)','METHOD','getJohnPasswordsLM',0,NULL,NULL,NULL,'lmhashes.txt',1);
 INSERT INTO `settingdetails` VALUES (27,NULL,NULL,'SECURITY: Get John the Ripper hashes (SHA-1 hash uppercase)','METHOD','getJohnPasswordsSHAUpperCase',0,NULL,NULL,NULL,'SHA-uc-hashes.txt',1);
 INSERT INTO `settingdetails` VALUES (28,NULL,NULL,'SECURITY: Get John the Ripper hashes (SHA-1 hash mixed case)','METHOD','getJohnPasswordsSHAMixedCase',0,NULL,NULL,NULL,'SHA-mc-hashes.txt',1);
-INSERT INTO `settingdetails` VALUES (29,NULL,NULL,'SECURITY: Get all PTFs','METHOD','getPTFs',0,'NULL','exportToXLSX','DefaultTableModel','ALLPTFs2.xlsx',1);
+INSERT INTO `settingdetails` VALUES (29,NULL,NULL,'SECURITY: Get John the Ripper hashes (DES)','METHOD','getJohnPasswordsDES',0,NULL,NULL,NULL,'DES-hashes.txt',1);
+INSERT INTO `settingdetails` VALUES (30,NULL,NULL,'SECURITY: Get all PTFs','METHOD','getPTFs',0,'NULL','exportToXLSX','DefaultTableModel','ALLPTFs2.xlsx',1);
 COMMIT;

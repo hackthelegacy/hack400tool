@@ -244,11 +244,13 @@ public class HackUI extends javax.swing.JFrame {
         LMHashCopyButton = new javax.swing.JButton();
         jLabel28 = new javax.swing.JLabel();
         userNameHashLabel = new javax.swing.JLabel();
-        SecondDESHashCopyButton = new javax.swing.JButton();
         FirstDESHashCopyButton = new javax.swing.JButton();
         FirstHMACHashCopyButton = new javax.swing.JButton();
         SecondHMACHashCopyButton = new javax.swing.JButton();
         UnknownHashCopyButton = new javax.swing.JButton();
+        jLabel29 = new javax.swing.JLabel();
+        DEShashTextField = new javax.swing.JTextField();
+        DESHashCopyButton = new javax.swing.JButton();
         GrabHashButton = new javax.swing.JButton();
         progressBar = new javax.swing.JProgressBar();
         cancelButton = new javax.swing.JButton();
@@ -933,9 +935,9 @@ public class HackUI extends javax.swing.JFrame {
             jPanel2.setBackground(new java.awt.Color(255, 255, 255));
             jPanel2.setBorder(javax.swing.BorderFactory.createTitledBorder("User properties"));
 
-            jLabel5.setText("First DES 56bit password substitute");
+            jLabel5.setText("DES PW_TOKENa");
 
-            jLabel23.setText("Second DES 56bit password substitute");
+            jLabel23.setText("DES PW_TOKENb");
 
             jLabel24.setText("LM hash");
 
@@ -975,13 +977,6 @@ public class HackUI extends javax.swing.JFrame {
 
             jLabel28.setText("User name");
 
-            SecondDESHashCopyButton.setText("Copy");
-            SecondDESHashCopyButton.addActionListener(new java.awt.event.ActionListener() {
-                public void actionPerformed(java.awt.event.ActionEvent evt) {
-                    SecondDESHashCopyButtonActionPerformed(evt);
-                }
-            });
-
             FirstDESHashCopyButton.setText("Copy");
             FirstDESHashCopyButton.addActionListener(new java.awt.event.ActionListener() {
                 public void actionPerformed(java.awt.event.ActionEvent evt) {
@@ -1010,43 +1005,62 @@ public class HackUI extends javax.swing.JFrame {
                 }
             });
 
+            jLabel29.setText("DES password token (A xor B)");
+
+            DEShashTextField.setEditable(false);
+
+            DESHashCopyButton.setText("Copy");
+            DESHashCopyButton.addActionListener(new java.awt.event.ActionListener() {
+                public void actionPerformed(java.awt.event.ActionEvent evt) {
+                    DESHashCopyButtonActionPerformed(evt);
+                }
+            });
+
             javax.swing.GroupLayout jPanel2Layout = new javax.swing.GroupLayout(jPanel2);
             jPanel2.setLayout(jPanel2Layout);
             jPanel2Layout.setHorizontalGroup(
                 jPanel2Layout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
-                .addGroup(javax.swing.GroupLayout.Alignment.TRAILING, jPanel2Layout.createSequentialGroup()
-                    .addContainerGap(61, Short.MAX_VALUE)
-                    .addGroup(jPanel2Layout.createParallelGroup(javax.swing.GroupLayout.Alignment.TRAILING)
-                        .addComponent(jLabel28)
-                        .addComponent(jLabel23)
-                        .addComponent(jLabel5)
-                        .addComponent(jLabel24)
-                        .addComponent(jLabel25)
-                        .addComponent(jLabel26)
-                        .addComponent(jLabel27))
-                    .addGap(18, 18, 18)
+                .addGroup(jPanel2Layout.createSequentialGroup()
+                    .addContainerGap(80, Short.MAX_VALUE)
                     .addGroup(jPanel2Layout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
-                        .addGroup(jPanel2Layout.createSequentialGroup()
+                        .addGroup(javax.swing.GroupLayout.Alignment.TRAILING, jPanel2Layout.createSequentialGroup()
+                            .addGroup(jPanel2Layout.createParallelGroup(javax.swing.GroupLayout.Alignment.TRAILING)
+                                .addComponent(jLabel28)
+                                .addComponent(jLabel23)
+                                .addComponent(jLabel5)
+                                .addComponent(jLabel29))
+                            .addGap(18, 18, 18)
+                            .addGroup(jPanel2Layout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
+                                .addGroup(jPanel2Layout.createSequentialGroup()
+                                    .addGroup(jPanel2Layout.createParallelGroup(javax.swing.GroupLayout.Alignment.TRAILING, false)
+                                        .addComponent(SecondDEShashTextField, javax.swing.GroupLayout.Alignment.LEADING, javax.swing.GroupLayout.DEFAULT_SIZE, 329, Short.MAX_VALUE)
+                                        .addComponent(FirstDEShashTextField, javax.swing.GroupLayout.Alignment.LEADING)
+                                        .addComponent(DEShashTextField, javax.swing.GroupLayout.Alignment.LEADING, javax.swing.GroupLayout.DEFAULT_SIZE, 329, Short.MAX_VALUE))
+                                    .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.UNRELATED)
+                                    .addGroup(jPanel2Layout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
+                                        .addComponent(FirstDESHashCopyButton)
+                                        .addComponent(DESHashCopyButton, javax.swing.GroupLayout.Alignment.TRAILING)))
+                                .addComponent(userNameHashLabel)))
+                        .addGroup(javax.swing.GroupLayout.Alignment.TRAILING, jPanel2Layout.createSequentialGroup()
+                            .addGroup(jPanel2Layout.createParallelGroup(javax.swing.GroupLayout.Alignment.TRAILING)
+                                .addComponent(jLabel24)
+                                .addComponent(jLabel25)
+                                .addComponent(jLabel26)
+                                .addComponent(jLabel27))
+                            .addGap(18, 18, 18)
                             .addGroup(jPanel2Layout.createParallelGroup(javax.swing.GroupLayout.Alignment.TRAILING, false)
                                 .addComponent(SecondHMAChashTextField, javax.swing.GroupLayout.Alignment.LEADING)
                                 .addComponent(FirstHMAChashTextField, javax.swing.GroupLayout.Alignment.LEADING)
                                 .addComponent(LMHashTextField, javax.swing.GroupLayout.Alignment.LEADING)
-                                .addComponent(SecondDEShashTextField, javax.swing.GroupLayout.Alignment.LEADING)
-                                .addComponent(FirstDEShashTextField, javax.swing.GroupLayout.Alignment.LEADING)
                                 .addComponent(jScrollPane3, javax.swing.GroupLayout.DEFAULT_SIZE, 329, Short.MAX_VALUE))
                             .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.UNRELATED)
                             .addGroup(jPanel2Layout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
                                 .addGroup(jPanel2Layout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
                                     .addGroup(jPanel2Layout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
-                                        .addGroup(jPanel2Layout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
-                                            .addGroup(jPanel2Layout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
-                                                .addComponent(LMHashCopyButton)
-                                                .addComponent(SecondDESHashCopyButton, javax.swing.GroupLayout.Alignment.TRAILING))
-                                            .addComponent(FirstDESHashCopyButton, javax.swing.GroupLayout.Alignment.TRAILING))
+                                        .addComponent(LMHashCopyButton)
                                         .addComponent(FirstHMACHashCopyButton, javax.swing.GroupLayout.Alignment.TRAILING))
                                     .addComponent(SecondHMACHashCopyButton, javax.swing.GroupLayout.Alignment.TRAILING))
-                                .addComponent(UnknownHashCopyButton, javax.swing.GroupLayout.Alignment.TRAILING)))
-                        .addComponent(userNameHashLabel))
+                                .addComponent(UnknownHashCopyButton, javax.swing.GroupLayout.Alignment.TRAILING))))
                     .addContainerGap())
             );
             jPanel2Layout.setVerticalGroup(
@@ -1061,12 +1075,16 @@ public class HackUI extends javax.swing.JFrame {
                         .addComponent(jLabel5)
                         .addComponent(FirstDEShashTextField, javax.swing.GroupLayout.PREFERRED_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.PREFERRED_SIZE)
                         .addComponent(FirstDESHashCopyButton))
-                    .addGap(9, 9, 9)
+                    .addGap(10, 10, 10)
                     .addGroup(jPanel2Layout.createParallelGroup(javax.swing.GroupLayout.Alignment.BASELINE)
                         .addComponent(jLabel23)
-                        .addComponent(SecondDEShashTextField, javax.swing.GroupLayout.PREFERRED_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.PREFERRED_SIZE)
-                        .addComponent(SecondDESHashCopyButton))
-                    .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.UNRELATED)
+                        .addComponent(SecondDEShashTextField, javax.swing.GroupLayout.PREFERRED_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.PREFERRED_SIZE))
+                    .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED, javax.swing.GroupLayout.DEFAULT_SIZE, Short.MAX_VALUE)
+                    .addGroup(jPanel2Layout.createParallelGroup(javax.swing.GroupLayout.Alignment.BASELINE)
+                        .addComponent(jLabel29)
+                        .addComponent(DEShashTextField, javax.swing.GroupLayout.PREFERRED_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.PREFERRED_SIZE)
+                        .addComponent(DESHashCopyButton))
+                    .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED)
                     .addGroup(jPanel2Layout.createParallelGroup(javax.swing.GroupLayout.Alignment.BASELINE)
                         .addComponent(jLabel24)
                         .addComponent(LMHashTextField, javax.swing.GroupLayout.PREFERRED_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.PREFERRED_SIZE)
@@ -1086,7 +1104,7 @@ public class HackUI extends javax.swing.JFrame {
                         .addComponent(jLabel27)
                         .addComponent(jScrollPane3, javax.swing.GroupLayout.PREFERRED_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.PREFERRED_SIZE)
                         .addComponent(UnknownHashCopyButton))
-                    .addContainerGap(54, Short.MAX_VALUE))
+                    .addGap(38, 38, 38))
             );
 
             GrabHashButton.setText("Grab the hash");
@@ -1148,7 +1166,7 @@ public class HackUI extends javax.swing.JFrame {
                                     .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED)
                                     .addComponent(cancelButton)
                                     .addGap(0, 0, Short.MAX_VALUE))
-                                .addComponent(jPanel2, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, Short.MAX_VALUE))
+                                .addComponent(jPanel2, javax.swing.GroupLayout.PREFERRED_SIZE, 415, Short.MAX_VALUE))
                             .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED)
                             .addComponent(GrabHashButton)
                             .addGap(12, 12, 12)))
@@ -1515,6 +1533,7 @@ public class HackUI extends javax.swing.JFrame {
                     }
                     FirstDEShashTextField.setText(testSystem.getEncryptedPasswordFromHashString(hashString, IBMiConnector.PASSWORD_HASH_FIRSTDES));
                     SecondDEShashTextField.setText(testSystem.getEncryptedPasswordFromHashString(hashString, IBMiConnector.PASSWORD_HASH_SECONDDES));
+                    DEShashTextField.setText(testSystem.getEncryptedPasswordFromHashString(hashString, IBMiConnector.PASSWORD_HASH_DES));
                     LMHashTextField.setText(testSystem.getEncryptedPasswordFromHashString(hashString, IBMiConnector.PASSWORD_HASH_LMHASH));
                     FirstHMAChashTextField.setText(testSystem.getEncryptedPasswordFromHashString(hashString, IBMiConnector.PASSWORD_HASH_HMACSHA1MC));
                     SecondHMAChashTextField.setText(testSystem.getEncryptedPasswordFromHashString(hashString, IBMiConnector.PASSWORD_HASH_HMACSHA1UC));
@@ -1534,20 +1553,11 @@ public class HackUI extends javax.swing.JFrame {
         c.setContents(hashData, hashData);
     }//GEN-LAST:event_LMHashCopyButtonActionPerformed
 
-    private void SecondDESHashCopyButtonActionPerformed(java.awt.event.ActionEvent evt) {//GEN-FIRST:event_SecondDESHashCopyButtonActionPerformed
-        Clipboard c = Toolkit.getDefaultToolkit().getSystemClipboard();
-        StringSelection hashData;
-
-        hashData = new StringSelection(userNameHashLabel.getText() + ":" + SecondDEShashTextField.getText());
-
-        c.setContents(hashData, hashData);
-    }//GEN-LAST:event_SecondDESHashCopyButtonActionPerformed
-
     private void FirstDESHashCopyButtonActionPerformed(java.awt.event.ActionEvent evt) {//GEN-FIRST:event_FirstDESHashCopyButtonActionPerformed
         Clipboard c = Toolkit.getDefaultToolkit().getSystemClipboard();
         StringSelection hashData;
 
-        hashData = new StringSelection(userNameHashLabel.getText() + ":" + FirstDEShashTextField.getText());
+        hashData = new StringSelection(userNameHashLabel.getText() + ":$as400des$*" + userNameHashLabel.getText() + "*" + FirstDEShashTextField.getText());
 
         c.setContents(hashData, hashData);
     }//GEN-LAST:event_FirstDESHashCopyButtonActionPerformed
@@ -1556,7 +1566,7 @@ public class HackUI extends javax.swing.JFrame {
         Clipboard c = Toolkit.getDefaultToolkit().getSystemClipboard();
         StringSelection hashData;
 
-        hashData = new StringSelection(userNameHashLabel.getText() + ":" + FirstHMAChashTextField.getText());
+        hashData = new StringSelection(userNameHashLabel.getText() + ":$as400ssha1$" + FirstHMAChashTextField.getText() + "$" + userNameHashLabel.getText());
 
         c.setContents(hashData, hashData);
     }//GEN-LAST:event_FirstHMACHashCopyButtonActionPerformed
@@ -1565,7 +1575,7 @@ public class HackUI extends javax.swing.JFrame {
         Clipboard c = Toolkit.getDefaultToolkit().getSystemClipboard();
         StringSelection hashData;
 
-        hashData = new StringSelection(userNameHashLabel.getText() + ":" + SecondHMAChashTextField.getText());
+        hashData = new StringSelection(userNameHashLabel.getText() + ":$as400ssha1$" + SecondHMAChashTextField.getText() + "$" + userNameHashLabel.getText());
 
         c.setContents(hashData, hashData);
     }//GEN-LAST:event_SecondHMACHashCopyButtonActionPerformed
@@ -1583,6 +1593,15 @@ public class HackUI extends javax.swing.JFrame {
         testSystem.cancelCurrentTask();
         progressBar.setValue(0);
     }//GEN-LAST:event_cancelButtonActionPerformed
+
+    private void DESHashCopyButtonActionPerformed(java.awt.event.ActionEvent evt) {//GEN-FIRST:event_DESHashCopyButtonActionPerformed
+        Clipboard c = Toolkit.getDefaultToolkit().getSystemClipboard();
+        StringSelection hashData;
+
+        hashData = new StringSelection(userNameHashLabel.getText() + ":$as400des$*" + userNameHashLabel.getText() + "*" + DEShashTextField.getText());
+
+        c.setContents(hashData, hashData);
+    }//GEN-LAST:event_DESHashCopyButtonActionPerformed
 
         
     public class MemberEditTableCellEditor extends DefaultCellEditor {
@@ -1674,6 +1693,8 @@ public class HackUI extends javax.swing.JFrame {
     private javax.swing.JRadioButton CLCommandPlainExec;
     private javax.swing.JTextField CLCommandText;
     private javax.swing.JPanel ConnectionConfigPane;
+    private javax.swing.JButton DESHashCopyButton;
+    private javax.swing.JTextField DEShashTextField;
     private javax.swing.JButton FirstDESHashCopyButton;
     private javax.swing.JTextField FirstDEShashTextField;
     private javax.swing.JButton FirstHMACHashCopyButton;
@@ -1683,7 +1704,6 @@ public class HackUI extends javax.swing.JFrame {
     private javax.swing.JTextField LMHashTextField;
     private javax.swing.JTextArea SQLCommandTextArea;
     private javax.swing.JTabbedPane SQLResultTabPane;
-    private javax.swing.JButton SecondDESHashCopyButton;
     private javax.swing.JTextField SecondDEShashTextField;
     private javax.swing.JButton SecondHMACHashCopyButton;
     private javax.swing.JTextField SecondHMAChashTextField;
@@ -1729,6 +1749,7 @@ public class HackUI extends javax.swing.JFrame {
     private javax.swing.JLabel jLabel26;
     private javax.swing.JLabel jLabel27;
     private javax.swing.JLabel jLabel28;
+    private javax.swing.JLabel jLabel29;
     private javax.swing.JLabel jLabel3;
     private javax.swing.JLabel jLabel4;
     private javax.swing.JLabel jLabel5;

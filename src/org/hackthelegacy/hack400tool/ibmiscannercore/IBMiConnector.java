@@ -132,6 +132,7 @@ public class IBMiConnector {
 
     public static final int PASSWORD_HASH_FIRSTDES = 0;
     public static final int PASSWORD_HASH_SECONDDES = 1;
+    public static final int PASSWORD_HASH_DES = 7;
     public static final int PASSWORD_HASH_LMHASH = 2;
     public static final int PASSWORD_HASH_HMACSHA1UC = 3;
     public static final int PASSWORD_HASH_HMACSHA1MC = 6;
@@ -1304,6 +1305,8 @@ public class IBMiConnector {
                 return hashString.substring(32,64);
             case PASSWORD_HASH_SECONDDES:
                 return hashString.substring(16,32);
+            case PASSWORD_HASH_DES:
+                return composeDESHashFromTokens(hashString.substring(0,16), hashString.substring(16,32));
             case PASSWORD_HASH_FIRSTDES:
             default: 
                 return hashString.substring(0,16);
@@ -1981,15 +1984,18 @@ public class IBMiConnector {
                 return _hexStringFromEBCDIC(char500Converter.toBytes(qsyrupwdInfo[3])).substring(2,540);            
             case PASSWORD_HASH_UNKNOWNHASH: // Unknown (hash?) data
                 return _hexStringFromEBCDIC(char500Converter.toBytes(qsyrupwdInfo[3])).substring(156,540);
-            case PASSWORD_HASH_HMACSHA1UC: // HMAC-SHA1 password (mixed case)
+            case PASSWORD_HASH_HMACSHA1MC: // HMAC-SHA1 password (mixed case)
                 return _hexStringFromEBCDIC(char500Converter.toBytes(qsyrupwdInfo[3])).substring(70,110);
-            case PASSWORD_HASH_HMACSHA1MC: // HMAC-SHA1 password (uppercase)
+            case PASSWORD_HASH_HMACSHA1UC: // HMAC-SHA1 password (uppercase)
                 return _hexStringFromEBCDIC(char500Converter.toBytes(qsyrupwdInfo[3])).substring(110,150);
             case PASSWORD_HASH_LMHASH: // LM hash
                 return _hexStringFromEBCDIC(char500Converter.toBytes(qsyrupwdInfo[3])).substring(34,66);
-            case PASSWORD_HASH_SECONDDES: // Second DES password
+            case PASSWORD_HASH_DES: // Composed DES hash (PW_TOKENa XOR PW_TOKENb):
+                return composeDESHashFromTokens(_hexStringFromEBCDIC(char500Converter.toBytes(qsyrupwdInfo[3])).substring(2,18), 
+                                                _hexStringFromEBCDIC(char500Converter.toBytes(qsyrupwdInfo[3])).substring(18,34));
+            case PASSWORD_HASH_SECONDDES: // Second DES password token (PW_TOKENb)
                 return _hexStringFromEBCDIC(char500Converter.toBytes(qsyrupwdInfo[3])).substring(18,34);
-            case PASSWORD_HASH_FIRSTDES: // First DES password
+            case PASSWORD_HASH_FIRSTDES: // First DES password (PW_TOKENa)
             default: 
                 return _hexStringFromEBCDIC(char500Converter.toBytes(qsyrupwdInfo[3])).substring(2,18);
         }        
@@ -2009,11 +2015,28 @@ public class IBMiConnector {
         
     }    
     
+    private String composeDESHashFromTokens(String PW_TOKENa, String PW_TOKENb)
+    {
+        //This method is valid only for passwords longer than 8 chars (see RFC2877, 5.2).
+        if (PW_TOKENb.equals("4040404040404040"))
+            return PW_TOKENa;
+
+        long l_a = Long.parseUnsignedLong(PW_TOKENa, 16);
+        long l_b = Long.parseUnsignedLong(PW_TOKENb, 16);
+        long l_pwtoken = l_a ^ l_b;
+        return String.format("%016x", l_pwtoken).toUpperCase();
+    }
+    
     public void getJohnPasswordsLM(String fileName) throws IOException
     {
         getJohnPasswords(PASSWORD_HASH_LMHASH, fileName);
     }
 
+    public void getJohnPasswordsDES(String fileName) throws IOException
+    {
+        getJohnPasswords(PASSWORD_HASH_DES, fileName);
+    }
+    
     public void getJohnPasswordsSHAUpperCase(String fileName) throws IOException
     {
         getJohnPasswords(PASSWORD_HASH_HMACSHA1UC, fileName);
@@ -2031,7 +2054,7 @@ public class IBMiConnector {
         Enumeration allUsers;
         String curPassword;
         File outFile = new File(fileName);
-        
+        prepareFile(fileName);
         BufferedWriter fileWriter = new BufferedWriter(new FileWriter(outFile));
         
         try {
@@ -2040,7 +2063,19 @@ public class IBMiConnector {
             {
                 curUser = (User)allUsers.nextElement();
                 curPassword = getEncryptedPassword(curUser.getName(), passType);
-                fileWriter.write(curUser.getName() + ":$as400ssha1$" + curPassword + "$" + curUser.getName() + "\n");
+                switch (passType) {
+                    case PASSWORD_HASH_DES:
+                        fileWriter.write(curUser.getName() + ":$as400des$*" + curUser.getName() + "*" + curPassword + "\n");
+                        break;
+                    case PASSWORD_HASH_HMACSHA1UC:
+                    case PASSWORD_HASH_HMACSHA1MC:
+                        fileWriter.write(curUser.getName() + ":$as400ssha1$" + curPassword + "$" + curUser.getName() + "\n");
+                        break;
+                    case PASSWORD_HASH_LMHASH:
+                    default:
+                        fileWriter.write(curUser.getName() + ":" + curPassword + "\n");
+                        break;
+                }
             }           
         } catch (Exception ex) {
             return;
@@ -2078,8 +2113,9 @@ public class IBMiConnector {
         columnNames.addElement("User expiration interval");
         columnNames.addElement("User expiration date");
         columnNames.addElement("User expiration action");
-        columnNames.addElement("User encrypted password (DES-1 hash 1)");
-        columnNames.addElement("User encrypted password (DES-1 hash 2)");
+        columnNames.addElement("User encrypted password (DES-1 hash - PW_TOKENa)");
+        columnNames.addElement("User encrypted password (DES-1 hash - PW_TOKENb)");
+        columnNames.addElement("User encrypted password (DES-1 hash)");
         columnNames.addElement("User encrypted password (LM Hash)");
         columnNames.addElement("User encrypted password (SHA-1 hash - mixed case)");
         columnNames.addElement("User encrypted password (SHA-1 hash - uppercase)");
@@ -2152,6 +2188,7 @@ public class IBMiConnector {
                 
                 newRow.addElement(getEncryptedPasswordFromHashString(encryptedPassword, PASSWORD_HASH_FIRSTDES));
                 newRow.addElement(getEncryptedPasswordFromHashString(encryptedPassword, PASSWORD_HASH_SECONDDES));
+                newRow.addElement(getEncryptedPasswordFromHashString(encryptedPassword, PASSWORD_HASH_DES));
                 newRow.addElement(getEncryptedPasswordFromHashString(encryptedPassword, PASSWORD_HASH_LMHASH));
                 newRow.addElement(getEncryptedPasswordFromHashString(encryptedPassword, PASSWORD_HASH_HMACSHA1MC));
                 newRow.addElement(getEncryptedPasswordFromHashString(encryptedPassword, PASSWORD_HASH_HMACSHA1UC));
@@ -2284,8 +2321,9 @@ public class IBMiConnector {
         columnNames.addElement("User expiration interval");
         columnNames.addElement("User expiration date");
         columnNames.addElement("User expiration action");
-        columnNames.addElement("User encrypted password (DES-1 hash 1)");
-        columnNames.addElement("User encrypted password (DES-1 hash 2)");
+        columnNames.addElement("User encrypted password (DES-1 hash - PW_TOKENa)");
+        columnNames.addElement("User encrypted password (DES-1 hash - PW_TOKENb)");
+        columnNames.addElement("User encrypted password (DES-1 hash)");
         columnNames.addElement("User encrypted password (LM Hash)");
         columnNames.addElement("User encrypted password (SHA-1 hash - mixed case)");
         columnNames.addElement("User encrypted password (SHA-1 hash - uppercase)");
@@ -2335,7 +2373,7 @@ public class IBMiConnector {
             }
         }
         
-        authMatrixName = dbTempConnection.createTempTable("istmatrix", 44 + allGroupsHashSet.size());
+        authMatrixName = dbTempConnection.createTempTable("istmatrix", columnNames.size());
         
         
         //the first row contains column names
@@ -2367,6 +2405,7 @@ public class IBMiConnector {
                 
                 newRow.addElement(getEncryptedPasswordFromHashString(encryptedPassword, PASSWORD_HASH_FIRSTDES));
                 newRow.addElement(getEncryptedPasswordFromHashString(encryptedPassword, PASSWORD_HASH_SECONDDES));
+                newRow.addElement(getEncryptedPasswordFromHashString(encryptedPassword, PASSWORD_HASH_DES));
                 newRow.addElement(getEncryptedPasswordFromHashString(encryptedPassword, PASSWORD_HASH_LMHASH));
                 newRow.addElement(getEncryptedPasswordFromHashString(encryptedPassword, PASSWORD_HASH_HMACSHA1MC));
                 newRow.addElement(getEncryptedPasswordFromHashString(encryptedPassword, PASSWORD_HASH_HMACSHA1UC));

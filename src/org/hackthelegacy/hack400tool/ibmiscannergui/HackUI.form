@@ -1190,7 +1190,7 @@
                                           <Component id="cancelButton" min="-2" max="-2" attributes="0"/>
                                           <EmptySpace min="0" pref="0" max="32767" attributes="0"/>
                                       </Group>
-                                      <Component id="jPanel2" max="32767" attributes="0"/>
+                                      <Component id="jPanel2" pref="415" max="32767" attributes="0"/>
                                   </Group>
                                   <EmptySpace max="-2" attributes="0"/>
                                   <Component id="GrabHashButton" min="-2" max="-2" attributes="0"/>
@@ -1261,39 +1261,52 @@
                   <Layout>
                     <DimensionLayout dim="0">
                       <Group type="103" groupAlignment="0" attributes="0">
-                          <Group type="102" alignment="1" attributes="0">
-                              <EmptySpace pref="61" max="32767" attributes="0"/>
-                              <Group type="103" groupAlignment="1" attributes="0">
-                                  <Component id="jLabel28" min="-2" max="-2" attributes="0"/>
-                                  <Component id="jLabel23" alignment="1" min="-2" max="-2" attributes="0"/>
-                                  <Component id="jLabel5" alignment="1" min="-2" max="-2" attributes="0"/>
-                                  <Component id="jLabel24" alignment="1" min="-2" max="-2" attributes="0"/>
-                                  <Component id="jLabel25" alignment="1" min="-2" max="-2" attributes="0"/>
-                                  <Component id="jLabel26" alignment="1" min="-2" max="-2" attributes="0"/>
-                                  <Component id="jLabel27" alignment="1" min="-2" max="-2" attributes="0"/>
-                              </Group>
-                              <EmptySpace type="separate" max="-2" attributes="0"/>
+                          <Group type="102" attributes="0">
+                              <EmptySpace pref="80" max="32767" attributes="0"/>
                               <Group type="103" groupAlignment="0" attributes="0">
-                                  <Group type="102" attributes="0">
+                                  <Group type="102" alignment="1" attributes="0">
+                                      <Group type="103" groupAlignment="1" attributes="0">
+                                          <Component id="jLabel28" min="-2" max="-2" attributes="0"/>
+                                          <Component id="jLabel23" alignment="1" min="-2" max="-2" attributes="0"/>
+                                          <Component id="jLabel5" alignment="1" min="-2" max="-2" attributes="0"/>
+                                          <Component id="jLabel29" alignment="1" min="-2" max="-2" attributes="0"/>
+                                      </Group>
+                                      <EmptySpace type="separate" max="-2" attributes="0"/>
+                                      <Group type="103" groupAlignment="0" attributes="0">
+                                          <Group type="102" attributes="0">
+                                              <Group type="103" groupAlignment="1" max="-2" attributes="0">
+                                                  <Component id="SecondDEShashTextField" alignment="0" pref="329" max="32767" attributes="0"/>
+                                                  <Component id="FirstDEShashTextField" alignment="0" max="32767" attributes="0"/>
+                                                  <Component id="DEShashTextField" alignment="0" pref="329" max="32767" attributes="0"/>
+                                              </Group>
+                                              <EmptySpace type="unrelated" max="-2" attributes="0"/>
+                                              <Group type="103" groupAlignment="0" attributes="0">
+                                                  <Component id="FirstDESHashCopyButton" min="-2" max="-2" attributes="0"/>
+                                                  <Component id="DESHashCopyButton" alignment="1" min="-2" max="-2" attributes="0"/>
+                                              </Group>
+                                          </Group>
+                                          <Component id="userNameHashLabel" min="-2" max="-2" attributes="0"/>
+                                      </Group>
+                                  </Group>
+                                  <Group type="102" alignment="1" attributes="0">
+                                      <Group type="103" groupAlignment="1" attributes="0">
+                                          <Component id="jLabel24" alignment="1" min="-2" max="-2" attributes="0"/>
+                                          <Component id="jLabel25" alignment="1" min="-2" max="-2" attributes="0"/>
+                                          <Component id="jLabel26" alignment="1" min="-2" max="-2" attributes="0"/>
+                                          <Component id="jLabel27" alignment="1" min="-2" max="-2" attributes="0"/>
+                                      </Group>
+                                      <EmptySpace type="separate" max="-2" attributes="0"/>
                                       <Group type="103" groupAlignment="1" max="-2" attributes="0">
                                           <Component id="SecondHMAChashTextField" alignment="0" max="32767" attributes="0"/>
                                           <Component id="FirstHMAChashTextField" alignment="0" max="32767" attributes="0"/>
                                           <Component id="LMHashTextField" alignment="0" max="32767" attributes="0"/>
-                                          <Component id="SecondDEShashTextField" alignment="0" max="32767" attributes="0"/>
-                                          <Component id="FirstDEShashTextField" alignment="0" max="32767" attributes="0"/>
                                           <Component id="jScrollPane3" pref="329" max="32767" attributes="0"/>
                                       </Group>
                                       <EmptySpace type="unrelated" max="-2" attributes="0"/>
                                       <Group type="103" groupAlignment="0" attributes="0">
-                                          <Group type="103" groupAlignment="0" attributes="0">
-                                              <Group type="103" groupAlignment="0" attributes="0">
-                                                  <Group type="103" groupAlignment="0" attributes="0">
-                                                      <Group type="103" groupAlignment="0" attributes="0">
-                                                          <Component id="LMHashCopyButton" min="-2" max="-2" attributes="0"/>
-                                                          <Component id="SecondDESHashCopyButton" alignment="1" min="-2" max="-2" attributes="0"/>
-                                                      </Group>
-                                                      <Component id="FirstDESHashCopyButton" alignment="1" min="-2" max="-2" attributes="0"/>
-                                                  </Group>
+                                          <Group type="103" alignment="0" groupAlignment="0" attributes="0">
+                                              <Group type="103" alignment="0" groupAlignment="0" attributes="0">
+                                                  <Component id="LMHashCopyButton" alignment="0" min="-2" max="-2" attributes="0"/>
                                                   <Component id="FirstHMACHashCopyButton" alignment="1" min="-2" max="-2" attributes="0"/>
                                               </Group>
                                               <Component id="SecondHMACHashCopyButton" alignment="1" min="-2" max="-2" attributes="0"/>
@@ -1301,7 +1314,6 @@
                                           <Component id="UnknownHashCopyButton" alignment="1" min="-2" max="-2" attributes="0"/>
                                       </Group>
                                   </Group>
-                                  <Component id="userNameHashLabel" min="-2" max="-2" attributes="0"/>
                               </Group>
                               <EmptySpace max="-2" attributes="0"/>
                           </Group>
@@ -1321,13 +1333,18 @@
                                   <Component id="FirstDEShashTextField" alignment="3" min="-2" max="-2" attributes="0"/>
                                   <Component id="FirstDESHashCopyButton" alignment="3" min="-2" max="-2" attributes="0"/>
                               </Group>
-                              <EmptySpace min="-2" pref="9" max="-2" attributes="0"/>
+                              <EmptySpace min="-2" pref="10" max="-2" attributes="0"/>
                               <Group type="103" groupAlignment="3" attributes="0">
                                   <Component id="jLabel23" alignment="3" min="-2" max="-2" attributes="0"/>
                                   <Component id="SecondDEShashTextField" alignment="3" min="-2" max="-2" attributes="0"/>
-                                  <Component id="SecondDESHashCopyButton" alignment="3" min="-2" max="-2" attributes="0"/>
                               </Group>
-                              <EmptySpace type="unrelated" max="-2" attributes="0"/>
+                              <EmptySpace max="32767" attributes="0"/>
+                              <Group type="103" groupAlignment="3" attributes="0">
+                                  <Component id="jLabel29" alignment="3" min="-2" max="-2" attributes="0"/>
+                                  <Component id="DEShashTextField" alignment="3" min="-2" max="-2" attributes="0"/>
+                                  <Component id="DESHashCopyButton" alignment="3" min="-2" max="-2" attributes="0"/>
+                              </Group>
+                              <EmptySpace max="-2" attributes="0"/>
                               <Group type="103" groupAlignment="3" attributes="0">
                                   <Component id="jLabel24" alignment="3" min="-2" max="-2" attributes="0"/>
                                   <Component id="LMHashTextField" alignment="3" min="-2" max="-2" attributes="0"/>
@@ -1351,7 +1368,7 @@
                                   <Component id="jScrollPane3" min="-2" max="-2" attributes="0"/>
                                   <Component id="UnknownHashCopyButton" min="-2" max="-2" attributes="0"/>
                               </Group>
-                              <EmptySpace pref="54" max="32767" attributes="0"/>
+                              <EmptySpace min="-2" pref="38" max="-2" attributes="0"/>
                           </Group>
                       </Group>
                     </DimensionLayout>
@@ -1359,12 +1376,12 @@
                   <SubComponents>
                     <Component class="javax.swing.JLabel" name="jLabel5">
                       <Properties>
-                        <Property name="text" type="java.lang.String" value="First DES 56bit password substitute"/>
+                        <Property name="text" type="java.lang.String" value="DES PW_TOKENa"/>
                       </Properties>
                     </Component>
                     <Component class="javax.swing.JLabel" name="jLabel23">
                       <Properties>
-                        <Property name="text" type="java.lang.String" value="Second DES 56bit password substitute"/>
+                        <Property name="text" type="java.lang.String" value="DES PW_TOKENb"/>
                       </Properties>
                     </Component>
                     <Component class="javax.swing.JLabel" name="jLabel24">
@@ -1447,14 +1464,6 @@
                     </Component>
                     <Component class="javax.swing.JLabel" name="userNameHashLabel">
                     </Component>
-                    <Component class="javax.swing.JButton" name="SecondDESHashCopyButton">
-                      <Properties>
-                        <Property name="text" type="java.lang.String" value="Copy"/>
-                      </Properties>
-                      <Events>
-                        <EventHandler event="actionPerformed" listener="java.awt.event.ActionListener" parameters="java.awt.event.ActionEvent" handler="SecondDESHashCopyButtonActionPerformed"/>
-                      </Events>
-                    </Component>
                     <Component class="javax.swing.JButton" name="FirstDESHashCopyButton">
                       <Properties>
                         <Property name="text" type="java.lang.String" value="Copy"/>
@@ -1485,6 +1494,24 @@
                       </Properties>
                       <Events>
                         <EventHandler event="actionPerformed" listener="java.awt.event.ActionListener" parameters="java.awt.event.ActionEvent" handler="UnknownHashCopyButtonActionPerformed"/>
+                      </Events>
+                    </Component>
+                    <Component class="javax.swing.JLabel" name="jLabel29">
+                      <Properties>
+                        <Property name="text" type="java.lang.String" value="DES password token (A xor B)"/>
+                      </Properties>
+                    </Component>
+                    <Component class="javax.swing.JTextField" name="DEShashTextField">
+                      <Properties>
+                        <Property name="editable" type="boolean" value="false"/>
+                      </Properties>
+                    </Component>
+                    <Component class="javax.swing.JButton" name="DESHashCopyButton">
+                      <Properties>
+                        <Property name="text" type="java.lang.String" value="Copy"/>
+                      </Properties>
+                      <Events>
+                        <EventHandler event="actionPerformed" listener="java.awt.event.ActionListener" parameters="java.awt.event.ActionEvent" handler="DESHashCopyButtonActionPerformed"/>
                       </Events>
                     </Component>
                   </SubComponents>

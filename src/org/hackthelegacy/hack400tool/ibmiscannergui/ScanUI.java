@@ -592,27 +592,27 @@ public class ScanUI extends javax.swing.JFrame {
                                                 switch (((String)detailSettings.getValueAt(0, 4)).toUpperCase()) /*output_type*/{
                                                     case "PRINT": /*output_params*/
                                                     testSystem.getSpoolFileToDOCX(outputDirectory + File.separator + 
-                                                        (String)detailSettings.getValueAt(0, 6),
+                                                        systemName.getText() + "-" + (String)detailSettings.getValueAt(0, 6),
                                                         (String)detailSettings.getValueAt(0, 5));
                                                     break;
                                                     case "OUTFILE":
                                                     testSystem.exportToXLSX2(outputDirectory + File.separator + 
-                                                        (String)detailSettings.getValueAt(0, 6),
+                                                        systemName.getText() + "-" + (String)detailSettings.getValueAt(0, 6),
                                                         testSystem.getPhysicalFileMemberAsTable2((String)detailSettings.getValueAt(0, 5)));
                                                     break;
                                                     case "STMF_TEXT":
                                                     testSystem.exportToDOCX(outputDirectory + File.separator + 
-                                                        (String)detailSettings.getValueAt(0, 6),
+                                                        systemName.getText() + "-" + (String)detailSettings.getValueAt(0, 6),
                                                         testSystem.getIFSTextFile((String)detailSettings.getValueAt(0, 5)));
                                                     break;
                                                     case "STMF_BIN":
                                                     testSystem.exportToBinaryFile(outputDirectory + File.separator + 
-                                                        (String)detailSettings.getValueAt(0, 6),
+                                                        systemName.getText() + "-" + (String)detailSettings.getValueAt(0, 6),
                                                         testSystem.getIFSBinaryFile((String)detailSettings.getValueAt(0, 5)));
                                                     break;
                                                     default:
                                                     testSystem.exportToDOCX(outputDirectory + File.separator + 
-                                                        (String)detailSettings.getValueAt(0, 6),
+                                                        systemName.getText() + "-" + (String)detailSettings.getValueAt(0, 6),
                                                         outputMessages);
                                                     break;
                                                 }
@@ -625,54 +625,58 @@ public class ScanUI extends javax.swing.JFrame {
                                                     switch ((String)detailSettings.getValueAt(0, 1)) {
                                                         case "getAuthorisationMatrix":
                                                             testSystem.exportToXLSX2(outputDirectory + File.separator + 
-                                                            (String)detailSettings.getValueAt(0, 6),
+                                                            systemName.getText() + "-" + (String)detailSettings.getValueAt(0, 6),
                                                             testSystem.getAuthorisationMatrix2());
                                                         break;
                                                         case "getAllSystemValues":
                                                         testSystem.exportToXLSX(outputDirectory + File.separator + 
-                                                            (String)detailSettings.getValueAt(0, 6),
+                                                            systemName.getText() + "-" + (String)detailSettings.getValueAt(0, 6),
                                                             testSystem.getAllSystemValues());
                                                         break;
                                                         case "getAllAuthorisationLists":
                                                         testSystem.exportToXLSX(outputDirectory + File.separator + 
-                                                            (String)detailSettings.getValueAt(0, 6),
+                                                            systemName.getText() + "-" + (String)detailSettings.getValueAt(0, 6),
                                                             testSystem.getAllAuthorisationLists());
                                                         break;
                                                         case "getAllLibraries":
                                                         testSystem.exportToXLSX(outputDirectory + File.separator + 
-                                                            (String)detailSettings.getValueAt(0, 6),
+                                                            systemName.getText() + "-" + (String)detailSettings.getValueAt(0, 6),
                                                             testSystem.getAllLibraries());
                                                         break;
                                                         case "getAllQSYSCommands":
                                                         testSystem.exportToXLSX(outputDirectory + File.separator + 
-                                                            (String)detailSettings.getValueAt(0, 6),
+                                                            systemName.getText() + "-" + (String)detailSettings.getValueAt(0, 6),
                                                             testSystem.getAllQSYSCommands());
                                                         break;
                                                         case "getAllFolderFiles":
                                                         testSystem.exportToXLSX(outputDirectory + File.separator + 
-                                                            (String)detailSettings.getValueAt(0, 6),
+                                                            systemName.getText() + "-" + (String)detailSettings.getValueAt(0, 6),
                                                             testSystem.getAuthoritiesForObjects(ObjectList.ALL, (String)detailSettings.getValueAt(0, 3), "*FILE"));
                                                         break;
                                                         case "getPhysicalFile":
                                                         testSystem.exportToXLSX(outputDirectory + File.separator + 
-                                                            (String)detailSettings.getValueAt(0, 6),
+                                                            systemName.getText() + "-" + (String)detailSettings.getValueAt(0, 6),
                                                             testSystem.getPhysicalFileMemberAsTable((String)detailSettings.getValueAt(0, 3)));
                                                         break;
                                                         case "getJohnPasswordsLM":
                                                         testSystem.getJohnPasswordsLM(outputDirectory + File.separator + 
-                                                            systemName.getText() + (String)detailSettings.getValueAt(0, 6));
+                                                            systemName.getText() + "-" + (String)detailSettings.getValueAt(0, 6));
+                                                        break;
+                                                        case "getJohnPasswordsDES":
+                                                        testSystem.getJohnPasswordsDES(outputDirectory + File.separator + 
+                                                            systemName.getText() + "-" + (String)detailSettings.getValueAt(0, 6));
                                                         break;
                                                         case "getJohnPasswordsSHAUpperCase":
                                                         testSystem.getJohnPasswordsSHAUpperCase(outputDirectory + File.separator + 
-                                                            systemName.getText() + (String)detailSettings.getValueAt(0, 6));
+                                                            systemName.getText() + "-" + (String)detailSettings.getValueAt(0, 6));
                                                         break;
                                                         case "getJohnPasswordsSHAMixedCase":
                                                         testSystem.getJohnPasswordsSHAMixedCase(outputDirectory + File.separator + 
-                                                            systemName.getText() + (String)detailSettings.getValueAt(0, 6));
+                                                            systemName.getText() + "-" + (String)detailSettings.getValueAt(0, 6));
                                                         break;
                                                         case "getPTFs":
                                                             testSystem.exportToXLSX2(outputDirectory + File.separator + 
-                                                            (String)detailSettings.getValueAt(0, 6),
+                                                            systemName.getText() + "-" + (String)detailSettings.getValueAt(0, 6),
                                                             testSystem.getPTFs2());
                                                         break;
                                                         default:
