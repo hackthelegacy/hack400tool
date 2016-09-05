@@ -2065,7 +2065,7 @@ public class IBMiConnector {
                 curPassword = getEncryptedPassword(curUser.getName(), passType);
                 switch (passType) {
                     case PASSWORD_HASH_DES:
-                        fileWriter.write(curUser.getName() + ":$as400des$*" + curUser.getName() + "*" + curPassword + "\n");
+                        fileWriter.write(curUser.getName() + ":$as400des$" + curUser.getName() + "*" + curPassword + "\n");
                         break;
                     case PASSWORD_HASH_HMACSHA1UC:
                     case PASSWORD_HASH_HMACSHA1MC:
