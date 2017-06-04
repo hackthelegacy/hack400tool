@@ -2,13 +2,6 @@
 <project-private xmlns="http://www.netbeans.org/ns/project-private/1">
     <editor-bookmarks xmlns="http://www.netbeans.org/ns/editor-bookmarks/2" lastBookmarkId="0"/>
     <open-files xmlns="http://www.netbeans.org/ns/projectui-open-files/2">
-        <group>
-            <file>file:/D:/My%20Data/Development/hack400tool/src/org/hackthelegacy/hack400tool/ibmiscannercore/SqliteDbConnector.java</file>
-            <file>file:/D:/My%20Data/Development/hack400tool/.git/config</file>
-            <file>file:/D:/My%20Data/Development/hack400tool/src/org/hackthelegacy/hack400tool/ibmiscannergui/ScanUI.java</file>
-            <file>file:/D:/My%20Data/Development/hack400tool/src/org/hackthelegacy/hack400tool/ibmiscannercore/IBMiConnector.java</file>
-            <file>file:/D:/My%20Data/Development/hack400tool/src/org/hackthelegacy/hack400tool/ibmiscannergui/HackUI.java</file>
-            <file>file:/D:/My%20Data/Development/hack400tool/src/org/hackthelegacy/hack400tool/ibmiscannercore/TextAreaOutputStream.java</file>
-        </group>
+        <group/>
     </open-files>
 </project-private>
