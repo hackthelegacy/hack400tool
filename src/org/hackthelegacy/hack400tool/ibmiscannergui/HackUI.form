@@ -97,6 +97,9 @@
       </Layout>
       <SubComponents>
         <Container class="javax.swing.JTabbedPane" name="tabAreaUI">
+          <AuxValues>
+            <AuxValue name="JavaCodeGenerator_AddingCodePost" type="java.lang.String" value="//gray-out SQL pane&#xa;tabAreaUI.setEnabledAt(5, false);"/>
+          </AuxValues>
 
           <Layout class="org.netbeans.modules.form.compat2.layouts.support.JTabbedPaneSupportLayout"/>
           <SubComponents>
@@ -136,6 +139,7 @@
                                       <Component id="userNameField" linkSize="1" alignment="0" min="-2" pref="117" max="-2" attributes="0"/>
                                       <Component id="systemName" linkSize="1" alignment="0" min="-2" pref="117" max="-2" attributes="0"/>
                                       <Component id="useSSL" min="-2" max="-2" attributes="0"/>
+                                      <Component id="useJDBC" alignment="0" min="-2" max="-2" attributes="0"/>
                                   </Group>
                                   <Group type="103" groupAlignment="0" attributes="0">
                                       <Group type="102" alignment="0" attributes="0">
@@ -191,7 +195,9 @@
                               <Component id="createTempLib" alignment="0" min="-2" max="-2" attributes="0"/>
                               <Component id="useSSL" min="-2" max="-2" attributes="0"/>
                           </Group>
-                          <EmptySpace min="-2" pref="32" max="-2" attributes="0"/>
+                          <EmptySpace max="-2" attributes="0"/>
+                          <Component id="useJDBC" min="-2" max="-2" attributes="0"/>
+                          <EmptySpace min="-2" pref="9" max="-2" attributes="0"/>
                           <Component id="jLabel6" min="-2" max="-2" attributes="0"/>
                           <EmptySpace max="-2" attributes="0"/>
                           <Group type="103" groupAlignment="3" attributes="0">
@@ -281,6 +287,12 @@
                   <Events>
                     <EventHandler event="actionPerformed" listener="java.awt.event.ActionListener" parameters="java.awt.event.ActionEvent" handler="disconnectButtonActionPerformed"/>
                   </Events>
+                </Component>
+                <Component class="javax.swing.JCheckBox" name="useJDBC">
+                  <Properties>
+                    <Property name="selected" type="boolean" value="true"/>
+                    <Property name="text" type="java.lang.String" value="Use JDBC"/>
+                  </Properties>
                 </Component>
               </SubComponents>
             </Container>
@@ -1013,7 +1025,7 @@
                 </Container>
               </SubComponents>
             </Container>
-            <Container class="javax.swing.JPanel" name="jPanel6">
+            <Container class="javax.swing.JPanel" name="SQLpane">
               <Constraints>
                 <Constraint layoutClass="org.netbeans.modules.form.compat2.layouts.support.JTabbedPaneSupportLayout" value="org.netbeans.modules.form.compat2.layouts.support.JTabbedPaneSupportLayout$JTabbedPaneConstraintsDescription">
                   <JTabbedPaneConstraints tabName="SQL commander">

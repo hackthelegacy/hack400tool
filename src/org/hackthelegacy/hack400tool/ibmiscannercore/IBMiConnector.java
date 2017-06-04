@@ -18,7 +18,6 @@
 package org.hackthelegacy.hack400tool.ibmiscannercore;
 
 import com.ibm.as400.access.*;
-import java.awt.Color;
 import java.awt.Component;
 
 import org.apache.poi.ss.usermodel.Cell;
@@ -46,6 +45,9 @@ import java.io.FileWriter;
 import java.io.FilenameFilter;
 import java.io.IOException;
 import java.io.StringReader;
+import java.security.KeyManagementException;
+import java.security.NoSuchAlgorithmException;
+import java.security.cert.CertificateException;
 import java.sql.CallableStatement;
 import java.sql.Connection;
 import java.sql.DriverManager;
@@ -60,31 +62,23 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.Date;
 import java.util.Enumeration;
-import java.util.HashMap;
 import java.util.Hashtable;
 import java.util.LinkedHashSet;
 import java.util.List;
-import java.util.Map;
 import java.util.Vector;
 import java.util.concurrent.ExecutionException;
 import java.util.logging.Level;
-import java.util.logging.LogRecord;
 import java.util.logging.Logger;
+import javax.net.ssl.*;
+import javax.security.cert.X509Certificate;
 import javax.swing.DefaultListModel;
-import javax.swing.Icon;
 import javax.swing.JFileChooser;
-import javax.swing.JFrame;
 import javax.swing.JTree;
 import javax.swing.ListModel;
-import javax.swing.ProgressMonitor;
-import javax.swing.SwingUtilities;
-import javax.swing.SwingWorker;
-import javax.swing.UIManager;
 import javax.swing.event.ListDataListener;
 import javax.swing.event.TreeModelListener;
 import javax.swing.filechooser.FileSystemView;
 import javax.swing.table.DefaultTableModel;
-import javax.swing.tree.DefaultMutableTreeNode;
 import javax.swing.tree.DefaultTreeCellRenderer;
 import javax.swing.tree.TreeModel;
 import javax.swing.tree.TreePath;
@@ -148,10 +142,12 @@ public class IBMiConnector {
     public IBMiConnector(String serverAddress, boolean useSSL, boolean useJDBC, boolean useGUI, boolean useSockets, boolean useNetSockets, String temporaryLibrary, String userName, String password, boolean useProxy, String proxyServer) 
             throws AS400SecurityException, IOException, 
             ErrorCompletingRequestException, InterruptedException, 
-            PropertyVetoException, ObjectDoesNotExistException, SQLException{
-                
+            PropertyVetoException, ObjectDoesNotExistException, SQLException, KeyManagementException, NoSuchAlgorithmException{
+
+        //Establish connection to the local temporary database
+        dbTempConnection = new SqliteDbConnector(new SimpleDateFormat("YYMMddHHmmSS").format(new Date()), true);           
         
-        if (useSSL) {
+        if (useSSL) {            
             if (userName.isEmpty() && password.isEmpty())
                 secureConnection = new SecureAS400(serverAddress);
             else
@@ -167,7 +163,31 @@ public class IBMiConnector {
             secureConnection = null;
             secure = false;
         }
-        
+
+        //SSL certificate bypass
+        TrustManager[] trustAllCerts = new TrustManager[] { new X509TrustManager() {
+            @Override
+            public java.security.cert.X509Certificate[] getAcceptedIssuers() { return null; }
+            public void checkClientTrusted(X509Certificate[] certs, String authType) { }
+            public void checkServerTrusted(X509Certificate[] certs, String authType) { }
+
+            @Override
+            public void checkClientTrusted(java.security.cert.X509Certificate[] xcs, String string) throws CertificateException {
+                return; 
+            }
+
+            @Override
+            public void checkServerTrusted(java.security.cert.X509Certificate[] xcs, String string) throws CertificateException {
+                return; 
+            }
+
+        } };
+
+        SSLContext sc = SSLContext.getInstance("SSL");        
+        sc.init(null, trustAllCerts, new java.security.SecureRandom());                        
+        SSLContext.setDefault(sc);
+        // End SSL certificate bypass
+                
         (secure ? secureConnection : insecureConnection).setGuiAvailable(useGUI);
         (secure ? secureConnection : insecureConnection).setMustUseSockets(true);
         (secure ? secureConnection : insecureConnection).setMustUseNetSockets(true);   
@@ -193,9 +213,7 @@ public class IBMiConnector {
         }
         
         Logger.getLogger(IBMiConnector.class.getName()).log(Level.INFO, runCLCommand("CRTPF FILE(" + curLib + "/" + DEFAULT_SPLF_NAME + ") RCDLEN(199) MAXMBRS(*NOMAX) SIZE(*NOMAX) LVLCHK(*NO)"));
-        
-        
-        
+                
         if (useJDBC)
         try {
             JDBCDriver = new AS400JDBCDriver();
@@ -212,34 +230,40 @@ public class IBMiConnector {
         ifsListModel = new IFSFileListModel("/");
         ifsFileTreeRenderer = new IFSFileTreeCellRenderer();                
         
-        dbTempConnection = new SqliteDbConnector(new SimpleDateFormat("YYMMddHHmmSS").format(new Date()), true);           
     }
 
     public IBMiConnector(String serverAddress, boolean useSSL, boolean useJDBC, boolean useGUI, boolean useSockets, boolean useNetSockets, String temporaryLibrary, String userName, String password) 
             throws AS400SecurityException, IOException, 
             ErrorCompletingRequestException, InterruptedException, 
-            PropertyVetoException, ObjectDoesNotExistException, SQLException{
+            PropertyVetoException, ObjectDoesNotExistException, SQLException, KeyManagementException, NoSuchAlgorithmException{
         this(serverAddress, useSSL, useJDBC, useGUI, useSockets, useNetSockets, temporaryLibrary, userName, password, false, "");
+    }
+    
+    public IBMiConnector(String serverAddress, boolean useSSL, boolean useJDBC, String temporaryLibrary, String userName, String password)
+            throws AS400SecurityException, IOException, 
+            ErrorCompletingRequestException, InterruptedException, 
+            PropertyVetoException, ObjectDoesNotExistException, SQLException, KeyManagementException, NoSuchAlgorithmException{
+        this(serverAddress, useSSL, useJDBC, false, false, false, temporaryLibrary, userName, password);
     }
     
     public IBMiConnector(String serverAddress, boolean useSSL, String temporaryLibrary, String userName, String password)
             throws AS400SecurityException, IOException, 
             ErrorCompletingRequestException, InterruptedException, 
-            PropertyVetoException, ObjectDoesNotExistException, SQLException{
+            PropertyVetoException, ObjectDoesNotExistException, SQLException, KeyManagementException, NoSuchAlgorithmException{
         this(serverAddress, useSSL, true, false, false, false, temporaryLibrary, userName, password);
     }
     
     public IBMiConnector(String serverAddress, boolean useSSL, String temporaryLibrary) 
             throws AS400SecurityException, IOException, 
             ErrorCompletingRequestException, InterruptedException, 
-            PropertyVetoException, ObjectDoesNotExistException, SQLException{
+            PropertyVetoException, ObjectDoesNotExistException, SQLException, KeyManagementException, NoSuchAlgorithmException{
         this(serverAddress, useSSL, temporaryLibrary, "", "");
     }
 
     public IBMiConnector(String serverAddress, String userName, String password) 
             throws AS400SecurityException, IOException, 
             ErrorCompletingRequestException, InterruptedException, 
-            PropertyVetoException, ObjectDoesNotExistException, SQLException{
+            PropertyVetoException, ObjectDoesNotExistException, SQLException, KeyManagementException, NoSuchAlgorithmException{
         this(serverAddress, false, "QTEMP", userName, password);        
     }
     
@@ -860,7 +884,7 @@ public class IBMiConnector {
 
                 if (!qp2shell.run())
                 {
-                    Logger.getLogger(IBMiConnector.class.getName()).log(Level.SEVERE, "Wywalilo sie");
+                    Logger.getLogger(IBMiConnector.class.getName()).log(Level.SEVERE, "An unexpected error occured.");
                     Logger.getLogger(IBMiConnector.class.getName()).log(Level.SEVERE, _stringFromAS400Message(qp2shell.getMessageList()));
                     return null;
                 }    
@@ -2763,6 +2787,137 @@ public class IBMiConnector {
         
         return true;
     }
+
+    public String getNetStat() 
+            throws PropertyVetoException, AS400SecurityException, 
+            ErrorCompletingRequestException, IOException, InterruptedException, 
+            ObjectDoesNotExistException, SQLException{
+
+        /*
+    
+            List Network Connections (QtocLstNetCnn) API
+            Required Parameter Group:
+
+          1	Qualified user space name           Input	Char(20)
+          2	Format name                         Input	Char(8)
+          3	Connection list qualifier           Input	Char(*)
+          4	Connection list qualifier size      Input	Binary(4)
+          5	Connection list qualifier format    Input	Char(8)
+          6	Error Code                          I/O         Char(*)
+           
+        
+        */
+
+        
+        createUserSpace("NETSTAT", curLib, "NETSTAT", 64000, "NETSTAT user space");
+        if (!makeUserSpaceAutoExtendible("NETSTAT", curLib, true))
+            return null;
+
+        String userSpaceName = _padTrimString("NETSTAT   " + curLib.toUpperCase(), 20);
+
+        ProgramParameter[] qtocnetstsParms = new ProgramParameter[6];
+
+        AS400Text char8Converter = new AS400Text(8);
+        AS400Text char20Converter = new AS400Text(20);    
+        AS400Text char64Converter = new AS400Text(64); 
+        AS400Bin4 bin4 = new AS400Bin4();                                                                        
+        
+        qtocnetstsParms[0] = new ProgramParameter(char20Converter.toBytes(userSpaceName));
+        qtocnetstsParms[0].setParameterType(ProgramParameter.PASS_BY_REFERENCE);
+        qtocnetstsParms[1] = new ProgramParameter(char8Converter.toBytes("NCNN0100"));
+        qtocnetstsParms[1].setParameterType(ProgramParameter.PASS_BY_REFERENCE);
+        qtocnetstsParms[2] = new ProgramParameter(char64Converter.toBytes(
+                /*
+                NCLQ0100 Format
+                Offset	Type	Field
+                Dec	Hex
+                0	0	CHAR(10)	Net connection type
+                10	A	CHAR(10)	List request type
+                20	14	CHAR(12)	Reserved
+                32	20	BINARY(4)	Local internet address lower value
+                36	24	BINARY(4)	Local internet address upper value
+                40	28	BINARY(4)	Local port lower value
+                44	2C	BINARY(4)	Local port upper value
+                48	30	BINARY(4)	Remote internet address lower value
+                52	34	BINARY(4)	Remote internet address upper value
+                56	38	BINARY(4)	Remote port lower value
+                60	3C	BINARY(4)	Remote port upper value                
+                */        
+                                    "*ALL      " +                 
+                                    "*ALL      " +
+                                    new String(new byte[] {0x00,0x00,0x00,0x00, 
+                                                           0x00,0x00,0x00,0x00, 
+                                                           0x00,0x00,0x00,0x00}) +                                             
+                                    new String(new byte[] {0x00,0x00,0x00,0x00}) +
+                                    new String(new byte[] {0x00,0x00,0x00,0x00}) +
+                                    new String(new byte[] {0x00,0x00,0x00,0x00}) +
+                                    new String(new byte[] {0x00,0x00,0x00,0x00}) +
+                                    new String(new byte[] {0x00,0x00,0x00,0x00}) +
+                                    new String(new byte[] {0x00,0x00,0x00,0x00}) +
+                                    new String(new byte[] {0x00,0x00,0x00,0x00}) +
+                                    new String(new byte[] {0x00,0x00,0x00,0x00}))); 
+        qtocnetstsParms[2].setParameterType(ProgramParameter.PASS_BY_REFERENCE);        
+        qtocnetstsParms[3] = new ProgramParameter(bin4.toBytes(new Integer(64)));
+        qtocnetstsParms[3].setParameterType(ProgramParameter.PASS_BY_REFERENCE);
+        qtocnetstsParms[4] = new ProgramParameter(char8Converter.toBytes("NCLQ0100"));
+        qtocnetstsParms[4].setParameterType(ProgramParameter.PASS_BY_REFERENCE);
+        byte[] errorBytes = new byte[32];
+        qtocnetstsParms[5] = new ProgramParameter(errorBytes, 32);
+        qtocnetstsParms[5].setParameterType(ProgramParameter.PASS_BY_REFERENCE);
+
+        ServiceProgramCall qtocnetsts = new ServiceProgramCall(secure ? secureConnection : insecureConnection,
+                                        "/qsys.lib/qtocnetsts.srvpgm", "QtocLstNetCnn",
+                                        ServiceProgramCall.NO_RETURN_VALUE, qtocnetstsParms);                                
+        if (!qtocnetsts.run()) {                            
+            Logger.getLogger(IBMiConnector.class.getName()).log(Level.INFO, _stringFromAS400Message(qtocnetsts.getMessageList()));
+        }
+        
+        /*
+        NCNN0100 Format
+
+        Offset	Type	Field
+        Dec	Hex
+        0	0	CHAR(15)	Remote address
+        15	F	CHAR(1)         Reserved
+        16	10	BINARY(4)	Remote address binary
+        20	14	CHAR(15)	Local address
+        35	23	CHAR(1)         Reserved
+        36	24	BINARY(4)	Local address binary
+        40	28	BINARY(4)	Remote port
+        44	2C	BINARY(4)	Local port
+        48	30	BINARY(4)	TCP state
+        52	34	BINARY(4)	Idle time in milliseconds
+        56	38	BINARY(8)	Bytes in
+        64	40	BINARY(8)	Bytes out
+        72	48	BINARY(4)	Connection open type
+        76	4C	CHAR(10)	Net connection type
+        86	56	CHAR(2)         Reserved
+        88	58	CHAR(10)	Associated user profile
+        98	62	CHAR(2)         Reserved
+        */
+        
+        AS400DataType[] netstatDataType = new AS400DataType[]{
+            new AS400Text(15),
+            new AS400Text(1),
+            new AS400Bin4(),            
+            new AS400Text(15),
+            new AS400Text(1),
+            new AS400Bin4(),            
+            new AS400Bin4(),            
+            new AS400Bin4(),            
+            new AS400Bin4(),     
+            new AS400Bin4(),   
+            new AS400Bin8(),            
+            new AS400Bin8(),        
+            new AS400Bin4(),            
+            new AS400Text(10),
+            new AS400Text(2),
+            new AS400Text(10),
+            new AS400Text(2)
+        };
+        
+        return retrieveUserSpace("NETSTAT", curLib, netstatDataType);
+    }
     
     public boolean createUserSpace(String uspcName, String uspcLibrary, String extAttr, int initialSize, String description)
             throws PropertyVetoException, AS400SecurityException, 
@@ -3103,7 +3258,7 @@ public class IBMiConnector {
             return null;
             }
 
-        //https://www.ibm.com/support/knowledgecenter/en/ssw_ibm_i_71/apiref/usfexample.htm
+        //https://www.ibm.com/support/knowledgecenter/en/ssw_ibm_i_71/apiref/usfgeneral.htm
         //Offset +7C
         AS400DataType[] headerFormat = new AS400DataType[]{
             new AS400Bin4(), //Offset to list data section
@@ -3177,7 +3332,7 @@ public class IBMiConnector {
             Vector arrayData = new Vector();
             
             for (Object arrayElement : returnedArray)
-                arrayData.addElement(arrayElement);
+                arrayData.addElement(arrayElement.toString().trim());
             
             dbTempConnection.insertrow(dbUserSpaceName, arrayData);
         }

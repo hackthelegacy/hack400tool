@@ -160,6 +160,7 @@ public class HackUI extends javax.swing.JFrame {
         outputDirFolderTextField = new javax.swing.JTextField();
         browseDirsButton = new javax.swing.JButton();
         disconnectButton = new javax.swing.JButton();
+        useJDBC = new javax.swing.JCheckBox();
         CLCommandPane = new javax.swing.JPanel();
         CLCommandText = new javax.swing.JTextField();
         jLabel11 = new javax.swing.JLabel();
@@ -212,7 +213,7 @@ public class HackUI extends javax.swing.JFrame {
         jButton1 = new javax.swing.JButton();
         jScrollPane12 = new javax.swing.JScrollPane();
         jTable1 = new javax.swing.JTable();
-        jPanel6 = new javax.swing.JPanel();
+        SQLpane = new javax.swing.JPanel();
         jLabel1 = new javax.swing.JLabel();
         jLabel3 = new javax.swing.JLabel();
         jScrollPane13 = new javax.swing.JScrollPane();
@@ -312,6 +313,9 @@ public class HackUI extends javax.swing.JFrame {
             }
         });
 
+        useJDBC.setSelected(true);
+        useJDBC.setText("Use JDBC");
+
         javax.swing.GroupLayout ConnectionConfigPaneLayout = new javax.swing.GroupLayout(ConnectionConfigPane);
         ConnectionConfigPane.setLayout(ConnectionConfigPaneLayout);
         ConnectionConfigPaneLayout.setHorizontalGroup(
@@ -332,7 +336,8 @@ public class HackUI extends javax.swing.JFrame {
                         .addGroup(ConnectionConfigPaneLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
                             .addComponent(userNameField, javax.swing.GroupLayout.PREFERRED_SIZE, 117, javax.swing.GroupLayout.PREFERRED_SIZE)
                             .addComponent(systemName, javax.swing.GroupLayout.PREFERRED_SIZE, 117, javax.swing.GroupLayout.PREFERRED_SIZE)
-                            .addComponent(useSSL))
+                            .addComponent(useSSL)
+                            .addComponent(useJDBC))
                         .addGroup(ConnectionConfigPaneLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
                             .addGroup(ConnectionConfigPaneLayout.createSequentialGroup()
                                 .addGap(57, 57, 57)
@@ -377,7 +382,9 @@ public class HackUI extends javax.swing.JFrame {
                 .addGroup(ConnectionConfigPaneLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
                     .addComponent(createTempLib)
                     .addComponent(useSSL))
-                .addGap(32, 32, 32)
+                .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED)
+                .addComponent(useJDBC)
+                .addGap(9, 9, 9)
                 .addComponent(jLabel6)
                 .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED)
                 .addGroup(ConnectionConfigPaneLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.BASELINE)
@@ -856,37 +863,37 @@ public class HackUI extends javax.swing.JFrame {
 
             maxRowsTextField.setText("1000");
 
-            javax.swing.GroupLayout jPanel6Layout = new javax.swing.GroupLayout(jPanel6);
-            jPanel6.setLayout(jPanel6Layout);
-            jPanel6Layout.setHorizontalGroup(
-                jPanel6Layout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
-                .addGroup(jPanel6Layout.createSequentialGroup()
+            javax.swing.GroupLayout SQLpaneLayout = new javax.swing.GroupLayout(SQLpane);
+            SQLpane.setLayout(SQLpaneLayout);
+            SQLpaneLayout.setHorizontalGroup(
+                SQLpaneLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
+                .addGroup(SQLpaneLayout.createSequentialGroup()
                     .addContainerGap()
-                    .addGroup(jPanel6Layout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
+                    .addGroup(SQLpaneLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
                         .addComponent(SQLResultTabPane)
-                        .addGroup(jPanel6Layout.createSequentialGroup()
-                            .addGroup(jPanel6Layout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
+                        .addGroup(SQLpaneLayout.createSequentialGroup()
+                            .addGroup(SQLpaneLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
                                 .addComponent(jLabel1)
                                 .addComponent(jLabel3)
-                                .addGroup(jPanel6Layout.createSequentialGroup()
+                                .addGroup(SQLpaneLayout.createSequentialGroup()
                                     .addComponent(jScrollPane13, javax.swing.GroupLayout.PREFERRED_SIZE, 1147, javax.swing.GroupLayout.PREFERRED_SIZE)
                                     .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.UNRELATED)
-                                    .addGroup(jPanel6Layout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
+                                    .addGroup(SQLpaneLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
                                         .addComponent(jButton7)
                                         .addComponent(jLabel4)
                                         .addComponent(maxRowsTextField, javax.swing.GroupLayout.PREFERRED_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.PREFERRED_SIZE))))
                             .addGap(0, 0, Short.MAX_VALUE)))
                     .addContainerGap())
             );
-            jPanel6Layout.setVerticalGroup(
-                jPanel6Layout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
-                .addGroup(jPanel6Layout.createSequentialGroup()
+            SQLpaneLayout.setVerticalGroup(
+                SQLpaneLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
+                .addGroup(SQLpaneLayout.createSequentialGroup()
                     .addContainerGap()
                     .addComponent(jLabel1)
                     .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED)
-                    .addGroup(jPanel6Layout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
+                    .addGroup(SQLpaneLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
                         .addComponent(jScrollPane13, javax.swing.GroupLayout.PREFERRED_SIZE, 141, javax.swing.GroupLayout.PREFERRED_SIZE)
-                        .addGroup(jPanel6Layout.createSequentialGroup()
+                        .addGroup(SQLpaneLayout.createSequentialGroup()
                             .addComponent(jLabel4)
                             .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED)
                             .addComponent(maxRowsTextField, javax.swing.GroupLayout.PREFERRED_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.PREFERRED_SIZE)
@@ -899,7 +906,7 @@ public class HackUI extends javax.swing.JFrame {
                     .addContainerGap())
             );
 
-            tabAreaUI.addTab("SQL commander", jPanel6);
+            tabAreaUI.addTab("SQL commander", SQLpane);
 
             privilegeEscalatorPane.setBackground(new java.awt.Color(255, 255, 255));
 
@@ -1211,6 +1218,9 @@ public class HackUI extends javax.swing.JFrame {
                     .addContainerGap(15, Short.MAX_VALUE))
             );
 
+            //gray-out SQL pane
+            tabAreaUI.setEnabledAt(5, false);
+
             javax.swing.GroupLayout layout = new javax.swing.GroupLayout(getContentPane());
             getContentPane().setLayout(layout);
             layout.setHorizontalGroup(
@@ -1465,7 +1475,8 @@ public class HackUI extends javax.swing.JFrame {
         disconnectButton.setEnabled(false);
 
         // clear panes
-        CLCommandButton.setEnabled(false);
+        CLCommandButton.setEnabled(false);        
+        tabAreaUI.setEnabledAt(5, false);
     }//GEN-LAST:event_disconnectButtonActionPerformed
 
     private void browseDirsButtonActionPerformed(java.awt.event.ActionEvent evt) {//GEN-FIRST:event_browseDirsButtonActionPerformed
@@ -1490,7 +1501,7 @@ public class HackUI extends javax.swing.JFrame {
                 try {
                     connectButton.setEnabled(false);
                     String passwordString = new String(passwordField.getPassword());
-                    testSystem = new IBMiConnector(systemName.getText(), useSSL.isSelected(),
+                    testSystem = new IBMiConnector(systemName.getText(), useSSL.isSelected(), useJDBC.isSelected(),
                         (createTempLib.isSelected() ? temporaryLibTextField.getText() : null), userNameField.getText(),
                         passwordString);
                     disconnectButton.setEnabled(true);
@@ -1498,11 +1509,13 @@ public class HackUI extends javax.swing.JFrame {
 
                     //initialize panes
                     CLCommandButton.setEnabled(true);
+                    tabAreaUI.setEnabledAt(5, useJDBC.isSelected());
 
                 } catch (Exception ex) {
                     Logger.getLogger(HackUI.class.getName()).log(Level.SEVERE, null, ex);
                     connectButton.setEnabled(true);
                     disconnectButton.setEnabled(false);
+                    tabAreaUI.setEnabledAt(5, false);
                 }
                 return null;
             }
@@ -1704,6 +1717,7 @@ public class HackUI extends javax.swing.JFrame {
     private javax.swing.JTextField LMHashTextField;
     private javax.swing.JTextArea SQLCommandTextArea;
     private javax.swing.JTabbedPane SQLResultTabPane;
+    private javax.swing.JPanel SQLpane;
     private javax.swing.JTextField SecondDEShashTextField;
     private javax.swing.JButton SecondHMACHashCopyButton;
     private javax.swing.JTextField SecondHMAChashTextField;
@@ -1761,7 +1775,6 @@ public class HackUI extends javax.swing.JFrame {
     private javax.swing.JPanel jPanel2;
     private javax.swing.JPanel jPanel3;
     private javax.swing.JPanel jPanel4;
-    private javax.swing.JPanel jPanel6;
     private javax.swing.JScrollPane jScrollPane1;
     private javax.swing.JScrollPane jScrollPane10;
     private javax.swing.JScrollPane jScrollPane11;
@@ -1799,6 +1812,7 @@ public class HackUI extends javax.swing.JFrame {
     private javax.swing.JTextField systemName;
     private javax.swing.JTabbedPane tabAreaUI;
     private javax.swing.JTextField temporaryLibTextField;
+    private javax.swing.JCheckBox useJDBC;
     private javax.swing.JCheckBox useSSL;
     private javax.swing.JTextField userNameField;
     private javax.swing.JLabel userNameHashLabel;
