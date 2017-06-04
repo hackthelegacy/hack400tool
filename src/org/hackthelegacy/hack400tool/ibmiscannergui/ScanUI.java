@@ -679,6 +679,10 @@ public class ScanUI extends javax.swing.JFrame {
                                                             systemName.getText() + "-" + (String)detailSettings.getValueAt(0, 6),
                                                             testSystem.getPTFs2());
                                                         break;
+                                                        case "netStat":                            
+                                                            testSystem.exportToXLSX2(outputDirectory + File.separator + 
+                                                            systemName.getText() + "-" + (String)detailSettings.getValueAt(0, 6),
+                                                            testSystem.getNetStat());    
                                                         default:
                                                         break;
                                                     }
