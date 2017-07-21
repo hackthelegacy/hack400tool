@@ -7,42 +7,61 @@
 <!-- the Compile on Save feature is turned off for the project. -->
 <!-- You can turn off the Compile on Save (or Deploy on Save) setting -->
 <!-- in the project's Project Properties dialog box.-->
-<project name="hack400tool" default="default" basedir=".">
+<project name="hack400exploiter" default="default" basedir=".">
     <description>Builds, tests, and runs the project hack400tool.</description>
     <import file="nbproject/build-impl.xml" as="impl"/>
     <target name="clean" depends="impl.clean"/>
     <target name="run" depends="impl.run"/>
     <target name="javadoc" depends="impl.javadoc"/>
-    <target name="jar" depends="hack400tool, IBMiScanner"/>
-    <target name="hack400tool" depends="impl.jar">        
-        <mkdir dir="${dist.dir}/hack400tool"/>        
-        <mkdir dir="${dist.dir}/hack400tool/lib" />
-        <mkdir dir="${dist.dir}/hack400tool/log" />
-        <mkdir dir="${dist.dir}/IBMiScanner/output" />
-        <copy todir="${dist.dir}/hack400tool/lib" overwrite="false">
+    <target name="jar" depends="hack400exploiter, hack400scanner, hack400auditor"/>
+    <target name="hack400exploiter" depends="impl.jar">        
+        <mkdir dir="${dist.dir}/hack400exploiter"/>        
+        <mkdir dir="${dist.dir}/hack400exploiter/lib" />
+        <mkdir dir="${dist.dir}/hack400exploiter/log" />
+        <mkdir dir="${dist.dir}/hack400exploiter/output" />
+        <copy todir="${dist.dir}/hack400exploiter/lib" overwrite="false">
             <fileset dir="${dist.dir}/lib"/>
         </copy>            
-        <jar destfile="${dist.dir}/hack400tool/hack400tool.jar" basedir="build/classes">
+        <jar destfile="${dist.dir}/hack400exploiter/hack400exploiter.jar" basedir="build/classes">
             <manifest>
                 <attribute name="Main-Class" value="org.hackthelegacy.hack400tool.ibmiscannergui.HackUI"/>
                 <attribute name="Class-Path" value="${jar.classpath}"/>
             </manifest>
         </jar>
     </target>
-    <target name="IBMiScanner" depends="impl.jar">
-        <mkdir dir="${dist.dir}/IBMiScanner"/>
-        <mkdir dir="${dist.dir}/IBMiScanner/lib"/>
-        <mkdir dir="${dist.dir}/IBMiScanner/log" />        
-        <mkdir dir="${dist.dir}/IBMiScanner/output" />
-        <copy file="IBMiScanner.db" todir="${dist.dir}/IBMiScanner" overwrite="false"/>
-        <copy file="sqlite3.exe" todir="${dist.dir}/IBMiScanner" overwrite="false"/> 
+    <target name="hack400scanner" depends="impl.jar">
+        <mkdir dir="${dist.dir}/hack400scanner"/>
+        <mkdir dir="${dist.dir}/hack400scanner/lib"/>
+        <mkdir dir="${dist.dir}/hack400scanner/log" />        
+        <mkdir dir="${dist.dir}/hack400scanner/output" />
+        <copy file="IBMiScanner.db" todir="${dist.dir}/hack400scanner" overwrite="false"/>
+        <copy file="sqlite3.exe" todir="${dist.dir}/hack400scanner" overwrite="false"/> 
            
-        <copy todir="${dist.dir}/IBMiScanner/lib" overwrite="false">
+        <copy todir="${dist.dir}/hack400scanner/lib" overwrite="false">
             <fileset dir="${dist.dir}/lib"/>
         </copy>            
-        <jar destfile="${dist.dir}/IBMiScanner/IBMiScanner.jar" basedir="build/classes">
+        <jar destfile="${dist.dir}/hack400scanner/hack400scanner.jar" basedir="build/classes">
             <manifest>
                 <attribute name="Main-Class" value="org.hackthelegacy.hack400tool.ibmiscannergui.ScanUI"/>
+                <attribute name="Class-Path" value="${jar.classpath}"/>
+            </manifest>
+        </jar>
+    </target>
+    <target name="hack400auditor" depends="impl.jar">
+        <mkdir dir="${dist.dir}/hack400auditor"/>
+        <mkdir dir="${dist.dir}/hack400auditor/lib"/>
+        <copy file="IBMiAuditor.db" todir="${dist.dir}/hack400auditor" overwrite="false"/>
+        <copy file="sqlite3.exe" todir="${dist.dir}/hack400auditor" overwrite="false"/> 
+        <copy file="IBMiAuditReport.jasper" todir="${dist.dir}/hack400auditor" overwrite="false"/>
+        <copy file="IBMiAuditReport-InsecurePorts.jasper" todir="${dist.dir}/hack400auditor" overwrite="false"/>
+        <copy file="IBMiAuditReport-SystemValues.jasper" todir="${dist.dir}/hack400auditor" overwrite="false"/>
+        <copy file="hack400auditor.png" todir="${dist.dir}/hack400auditor" overwrite="false"/>                 
+        <copy todir="${dist.dir}/hack400auditor/lib" overwrite="false">
+            <fileset dir="${dist.dir}/lib"/>
+        </copy>            
+        <jar destfile="${dist.dir}/hack400auditor/hack400auditor.jar" basedir="build/classes">
+            <manifest>
+                <attribute name="Main-Class" value="org.hackthelegacy.hack400tool.ibmiscannergui.ReportUI"/>
                 <attribute name="Class-Path" value="${jar.classpath}"/>
             </manifest>
         </jar>

@@ -1,6 +1,6 @@
 //    "hack400tool"
 //    - security handling tools for IBM Power Systems (formerly known as AS/400)
-//    Copyright (C) 2010-2016  Bart Kulach
+//    Copyright (C) 2010-2017  Bart Kulach
 //    This file, IBMiConnector.java, is part of hack400tool package.
 
 //    "hack400tool" is free software: you can redistribute it and/or modify
@@ -38,15 +38,19 @@ import java.awt.Frame;
 import java.beans.PropertyVetoException;
 import java.io.BufferedReader;
 import java.io.BufferedWriter;
+import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.File;
+import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.FileWriter;
 import java.io.FilenameFilter;
 import java.io.IOException;
 import java.io.StringReader;
+import java.nio.ByteBuffer;
 import java.security.KeyManagementException;
 import java.security.NoSuchAlgorithmException;
+import java.security.Security;
 import java.security.cert.CertificateException;
 import java.sql.CallableStatement;
 import java.sql.Connection;
@@ -86,10 +90,59 @@ import javax.xml.parsers.DocumentBuilder;
 import javax.xml.parsers.DocumentBuilderFactory;
 
 public class IBMiConnector {
+
+    public static final int CL_COMMAND_EXEC_PLAIN = 100;
+    public static final int CL_COMMAND_EXEC_JDBC = 101;
+    public static final int CL_COMMAND_EXEC_QSHELL = 102;
     
+    public static final int PASSWORD_TYPE_NOPWD = 100;
+    public static final int PASSWORD_TYPE_NOPWDCHK = 101;
+    public static final int PASSWORD_TYPE_NOPWDSTS = 102;
+
+    public static final int PASSWORD_HASH_FIRSTDES = 0;
+    public static final int PASSWORD_HASH_SECONDDES = 1;
+    public static final int PASSWORD_HASH_DES = 7;
+    public static final int PASSWORD_HASH_LMHASH = 2;
+    public static final int PASSWORD_HASH_HMACSHA1UC = 3;
+    public static final int PASSWORD_HASH_HMACSHA1MC = 6;
+    public static final int PASSWORD_HASH_UNKNOWNHASH = 4;
+    public static final int PASSWORD_HASH_ALLDATA = 5;    
+        
+    private static int O_CREAT = 00010;
+    private static int O_EXCL  = 00020;
+    private static int O_TRUNC = 00100;
+
+    private static int O_RDONLY  = 00001;
+    private static int O_WRONLY  = 00002;
+    private static int O_RDWR    = 00004;
+
+    private static int S_IRWXU = 0000700;
+    private static int S_IRUSR = 0000400;
+    private static int S_IWUSR = 0000200;
+    private static int S_IXUSR = 0000100;
+
+    private static int S_IRWXG = 0000070;
+    private static int S_IRGRP = 0000040;
+    private static int S_IWGRP = 0000020;
+    private static int S_IXGRP = 0000010;
+    
+    private static int S_IRWXO = 0000007;
+    private static int S_IROTH = 0000004;
+    private static int S_IWOTH = 0000002;
+    private static int S_IXOTH = 0000001;
+   
     private AS400 insecureConnection = null;
     private SecureAS400 secureConnection = null;
     private boolean secure = false;
+
+    private IFSFileOutputStream stdinQShell;
+    private IFSFileInputStream stdoutQShell;
+    private IFSFileInputStream stderrQShell;
+    private long fdStdin;
+    private long fdStdout;
+    private long fdStderr;
+    private boolean isQShellOnline = false;
+    
     private String curLib = "";
     private Job currentJob = null;
     private IFSFileTreeModel ifsTreeModel = null;
@@ -111,27 +164,10 @@ public class IBMiConnector {
     private byte[][] userHandlesJDBC = new byte[10][];
     private int escalationLevel = 0;
     private int escalationLevelJDBC = 0;
-    
-    
+       
     private int escalationUsersCurThreads = 0;
     private int objectListCurThreads = 0;
     
-    public static final int CL_COMMAND_EXEC_PLAIN = 100;
-    public static final int CL_COMMAND_EXEC_JDBC = 101;
-    public static final int CL_COMMAND_EXEC_QSHELL = 102;
-    
-    public static final int PASSWORD_TYPE_NOPWD = 100;
-    public static final int PASSWORD_TYPE_NOPWDCHK = 101;
-    public static final int PASSWORD_TYPE_NOPWDSTS = 102;
-
-    public static final int PASSWORD_HASH_FIRSTDES = 0;
-    public static final int PASSWORD_HASH_SECONDDES = 1;
-    public static final int PASSWORD_HASH_DES = 7;
-    public static final int PASSWORD_HASH_LMHASH = 2;
-    public static final int PASSWORD_HASH_HMACSHA1UC = 3;
-    public static final int PASSWORD_HASH_HMACSHA1MC = 6;
-    public static final int PASSWORD_HASH_UNKNOWNHASH = 4;
-    public static final int PASSWORD_HASH_ALLDATA = 5;    
     private static final int MAX_THREADS = 20;
     private static final int SLEEP_TIME = 100; 
     private static final int MAX_SLEEP = 5000; 
@@ -139,11 +175,14 @@ public class IBMiConnector {
     private static final String DEFAULT_OUTQ_NAME = "HACKOUTQ";
     private static final String DEFAULT_SPLF_NAME = "HACKSPLF";
     
+    private static final int DEFAULT_USERSPACE_READ_BUFFER_SIZE = 2097152;
+    
     public IBMiConnector(String serverAddress, boolean useSSL, boolean useJDBC, boolean useGUI, boolean useSockets, boolean useNetSockets, String temporaryLibrary, String userName, String password, boolean useProxy, String proxyServer) 
             throws AS400SecurityException, IOException, 
             ErrorCompletingRequestException, InterruptedException, 
             PropertyVetoException, ObjectDoesNotExistException, SQLException, KeyManagementException, NoSuchAlgorithmException{
 
+                
         //Establish connection to the local temporary database
         dbTempConnection = new SqliteDbConnector(new SimpleDateFormat("YYMMddHHmmSS").format(new Date()), true);           
         
@@ -184,7 +223,7 @@ public class IBMiConnector {
         } };
 
         SSLContext sc = SSLContext.getInstance("SSL");        
-        sc.init(null, trustAllCerts, new java.security.SecureRandom());                        
+        sc.init(null, trustAllCerts, new java.security.SecureRandom());    
         SSLContext.setDefault(sc);
         // End SSL certificate bypass
                 
@@ -194,8 +233,7 @@ public class IBMiConnector {
         
         (secure ? secureConnection : insecureConnection).connectService(AS400.SIGNON);
         (secure ? secureConnection : insecureConnection).connectService(AS400.FILE);
-        
-        
+                
         currentJob = new Job((secure ? secureConnection : insecureConnection));
         
         String message = "User " +
@@ -204,7 +242,7 @@ public class IBMiConnector {
                 ", version " + (secure ? secureConnection : insecureConnection).getVRM() +
                 ", job number ";
         
-        curLib = ((temporaryLibrary == null || temporaryLibrary.isEmpty()) ? "QTEMP" : temporaryLibrary.substring(0, (temporaryLibrary.length() < 10 ? temporaryLibrary.length() : 10)));
+        curLib = ((temporaryLibrary == null || temporaryLibrary.isEmpty()) ? "QTEMP" : temporaryLibrary.substring(0, (temporaryLibrary.length() < 10 ? temporaryLibrary.length() : 10)).toUpperCase());
         Logger.getLogger(IBMiConnector.class.getName()).log(Level.INFO, message);
         
         if (!curLib.matches("QTEMP")) {
@@ -212,8 +250,8 @@ public class IBMiConnector {
             Logger.getLogger(IBMiConnector.class.getName()).log(Level.INFO, runCLCommand("CLRLIB LIB(" + curLib + ")"));            
         }
         
-        Logger.getLogger(IBMiConnector.class.getName()).log(Level.INFO, runCLCommand("CRTPF FILE(" + curLib + "/" + DEFAULT_SPLF_NAME + ") RCDLEN(199) MAXMBRS(*NOMAX) SIZE(*NOMAX) LVLCHK(*NO)"));
-                
+        Logger.getLogger(IBMiConnector.class.getName()).log(Level.INFO, runCLCommand("CRTPF FILE(" + curLib + "/" + DEFAULT_SPLF_NAME + ") RCDLEN(199) MAXMBRS(*NOMAX) SIZE(*NOMAX) LVLCHK(*NO)"));        
+        
         if (useJDBC)
         try {
             JDBCDriver = new AS400JDBCDriver();
@@ -228,8 +266,26 @@ public class IBMiConnector {
         
         ifsTreeModel = new IFSFileTreeModel("/");
         ifsListModel = new IFSFileListModel("/");
-        ifsFileTreeRenderer = new IFSFileTreeCellRenderer();                
+        ifsFileTreeRenderer = new IFSFileTreeCellRenderer();              
         
+        String stdoutFileName = "/tmp/stdout" + new SimpleDateFormat("YYMMddHHmmSS").format(new Date());
+        String stderrFileName = "/tmp/stderr" + new SimpleDateFormat("YYMMddHHmmSS").format(new Date());
+        fdStdout = openFileDescriptor(stdoutFileName, O_CREAT|O_TRUNC|O_RDWR, S_IRUSR|S_IWUSR|S_IRGRP|S_IWGRP|S_IROTH|S_IWOTH);
+        fdStderr = openFileDescriptor(stderrFileName, O_CREAT|O_TRUNC|O_RDWR, S_IRUSR|S_IWUSR|S_IRGRP|S_IWGRP|S_IROTH|S_IWOTH);
+        if ((fdStdout>>32) == 1 && (fdStderr>>32) == 2) {
+            runCLCommand("ADDENVVAR ENVVAR(QIBM_USE_DESCRIPTOR_STDIO) VALUE('Y')");
+            runQShellCommand("chmod 666 " + stdoutFileName + " > /dev/null");
+            runQShellCommand("chmod 666 " + stderrFileName + " > /dev/null");
+            stdoutQShell = new IFSFileInputStream((secure ? secureConnection : insecureConnection), stdoutFileName);
+            stderrQShell = new IFSFileInputStream((secure ? secureConnection : insecureConnection), stderrFileName);        
+            isQShellOnline = true;
+        } else{
+            Logger.getLogger(IBMiConnector.class.getName()).log(Level.SEVERE, "QShell connection could not be initialized (cannot open stdout/stderr)."); 
+        }
+        //DEBUG
+        //END DEBUG
+        
+        Logger.getLogger(IBMiConnector.class.getName()).log(Level.INFO, "Connected.");        
     }
 
     public IBMiConnector(String serverAddress, boolean useSSL, boolean useJDBC, boolean useGUI, boolean useSockets, boolean useNetSockets, String temporaryLibrary, String userName, String password) 
@@ -278,12 +334,84 @@ public class IBMiConnector {
         }
         if (JDBCStatement != null && !JDBCStatement.isClosed()) JDBCStatement.close();
         if (JDBCConnection  != null && !JDBCConnection.isClosed()) JDBCConnection.close();
+        isQShellOnline = false;
+        IFSFile stdoutFile = new IFSFile((secure ? secureConnection : insecureConnection), stdoutQShell.getPath());
+        stdoutFile.delete();
+        IFSFile stderrFile = new IFSFile((secure ? secureConnection : insecureConnection), stderrQShell.getPath());
+        stderrFile.delete();        
         (secure ? secureConnection : insecureConnection).disconnectAllServices();
         Logger.getLogger(IBMiConnector.class.getName()).log(Level.INFO, "Disconnected.");
         dbTempConnection.disconnect();
         dbTempConnection.deleteDatabase();
     }
     
+    public boolean isQShellOnline(){
+        return isQShellOnline;
+    }
+    
+    public int checkQShellStdoutAvailableBytes() throws IOException{
+        if (stdoutQShell==null) return -1;
+        return stdoutQShell.available();
+    }
+    
+    public int checkQShellStderrAvailableBytes() throws IOException{
+        if (stderrQShell==null) return -1;
+        return stderrQShell.available();
+    }
+    
+    public String readQShellStdout() throws IOException{
+        byte[] buffer = new byte[stdoutQShell.available()];
+        stdoutQShell.read(buffer);
+        return new AS400Text(buffer.length).toObject(buffer).toString();
+    }
+
+    public String readQShellStderr() throws IOException{
+        byte[] buffer = new byte[stderrQShell.available()];
+        stderrQShell.read(buffer);
+        return new AS400Text(buffer.length).toObject(buffer).toString();
+    }
+    
+    private long openFileDescriptor(String path, int oflag, int mode) 
+            throws PropertyVetoException, AS400SecurityException, 
+            ErrorCompletingRequestException, IOException, 
+            InterruptedException, ObjectDoesNotExistException{
+        ProgramParameter[] qp0llib1Parms = new ProgramParameter[3];
+        
+        qp0llib1Parms[0] = new ProgramParameter(new AS400Text(path.length()+1).toBytes(path + "\0"));
+        qp0llib1Parms[0].setParameterType(ProgramParameter.PASS_BY_REFERENCE);
+        qp0llib1Parms[1] = new ProgramParameter(new AS400Bin4().toBytes(oflag));
+        qp0llib1Parms[1].setParameterType(ProgramParameter.PASS_BY_VALUE);
+        qp0llib1Parms[2] = new ProgramParameter(new AS400Bin4().toBytes(mode));
+        qp0llib1Parms[2].setParameterType(ProgramParameter.PASS_BY_VALUE);        
+
+        ServiceProgramCall qp0llib1 = new ServiceProgramCall((secure ? secureConnection : insecureConnection),
+                                        "/qsys.lib/qp0llib1.srvpgm", "open",
+                                        ServiceProgramCall.RETURN_INTEGER, qp0llib1Parms);                                
+        if (!qp0llib1.run()) {                            
+            Logger.getLogger(IBMiConnector.class.getName()).log(Level.SEVERE, IBMiUtilities.stringFromAS400Message(qp0llib1.getMessageList()));
+            return -1;
+        }       
+        //Logger.getLogger(IBMiConnector.class.getName()).log(Level.SEVERE, IBMiUtilities.hexStringFromEBCDIC(qp0llib1.getReturnValue()));
+        return (long)new AS400Bin8().toObject(qp0llib1.getReturnValue());
+    }
+
+    private int closeFileDescriptor(long fildes) throws PropertyVetoException, AS400SecurityException, ErrorCompletingRequestException, IOException, InterruptedException, ObjectDoesNotExistException{
+        ProgramParameter[] qp0llib1Parms = new ProgramParameter[1];
+        
+        qp0llib1Parms[0] = new ProgramParameter(new AS400Bin8().toBytes(fildes));
+        qp0llib1Parms[0].setParameterType(ProgramParameter.PASS_BY_REFERENCE);
+
+        ServiceProgramCall qp0llib1 = new ServiceProgramCall((secure ? secureConnection : insecureConnection),
+                                        "/qsys.lib/qp0llib1.srvpgm", "close",
+                                        ServiceProgramCall.RETURN_INTEGER, qp0llib1Parms);                                
+        if (!qp0llib1.run()) {                            
+            Logger.getLogger(IBMiConnector.class.getName()).log(Level.SEVERE, IBMiUtilities.stringFromAS400Message(qp0llib1.getMessageList()));
+            return -1;
+        }       
+        Logger.getLogger(IBMiConnector.class.getName()).log(Level.SEVERE, IBMiUtilities.hexStringFromEBCDIC(qp0llib1.getReturnValue()));
+        return qp0llib1.getIntegerReturnValue();
+    }   
+
     public String getExceptionDetails(Exception ex) {
         String exceptionDetails = "";
         exceptionDetails += "Exception thrown was: " + ex.getClass().getName() + "\nException details:\n";
@@ -422,7 +550,7 @@ public class IBMiConnector {
     public void exportToBinaryFile(String fileName, byte[] binaryInput){
         System.out.println("Save as file: " + fileName);
         try {              
-            prepareFile(fileName);
+            IBMiUtilities.prepareFile(fileName);
             FileOutputStream fileOutStream = new FileOutputStream(fileName);
             fileOutStream.write(binaryInput);
             fileOutStream.close();
@@ -432,10 +560,14 @@ public class IBMiConnector {
     }
         
     public void exportToXLSX(String fileName, DefaultTableModel tableModel){
+        if (tableModel == null || fileName == null){
+            Logger.getLogger(IBMiConnector.class.getName()).log(Level.SEVERE, "Errors occured.");            
+            return;
+        }
         Workbook excelWorkbook = new XSSFWorkbook();
         System.out.println("Save as file: " + fileName);
         try {
-            prepareFile(fileName);
+            IBMiUtilities.prepareFile(fileName);
             FileOutputStream fileOutStream = new FileOutputStream(fileName);                
             Sheet sheet = excelWorkbook.createSheet(fileName.replaceAll("[:\\\\////]", "."));
             for (int rowNum=0; rowNum <= tableModel.getRowCount(); rowNum++) {
@@ -457,6 +589,10 @@ public class IBMiConnector {
     }
 
     public void exportToXLSX2(String fileName, String tableName) throws SQLException{
+        if (tableName == null || fileName == null){
+            Logger.getLogger(IBMiConnector.class.getName()).log(Level.SEVERE, "Errors occured.");            
+            return;
+        }
         dbTempConnection.exportXLSX(fileName, tableName);
     }
     
@@ -471,7 +607,7 @@ public class IBMiConnector {
         
         System.out.println("Save as file: " + fileName);
         try {
-            prepareFile(fileName);
+            IBMiUtilities.prepareFile(fileName);
             FileOutputStream fileOutStream = new FileOutputStream(fileName);                
             XWPFDocument wordDocument = new XWPFDocument();   
             String[] textArray = inputText.split("\n");
@@ -527,10 +663,11 @@ public class IBMiConnector {
     public String getSpoolFile(String spoolName) 
             throws PropertyVetoException, AS400Exception, 
             AS400SecurityException, ErrorCompletingRequestException, 
-            IOException, InterruptedException, RequestNotSupportedException, ObjectDoesNotExistException, SQLException{
+            IOException, InterruptedException, RequestNotSupportedException, 
+            ObjectDoesNotExistException, SQLException{
                 
         Logger.getLogger(IBMiConnector.class.getName()).log(Level.INFO, runCLCommand("CPYSPLF FILE(" + spoolName + ") TOFILE(" + curLib + "/" + DEFAULT_SPLF_NAME + ") JOB(" +
-                                _getLastPrintJobNumber() + "/" + currentJob.getStringValue(Job.CURRENT_USER) + "/QPRTJOB) SPLNBR(*LAST)"));
+                                getLastPrintJobNumber() + "/" + currentJob.getStringValue(Job.CURRENT_USER) + "/QPRTJOB) SPLNBR(*LAST)"));
         
         String outputString = getPhysicalFileMemberAsText(curLib + "/" + DEFAULT_SPLF_NAME + "");
         Logger.getLogger(IBMiConnector.class.getName()).log(Level.INFO, runCLCommand("RMVM FILE(" + curLib + "/" + DEFAULT_SPLF_NAME + ") MBR(*ALL)"));
@@ -540,10 +677,11 @@ public class IBMiConnector {
     public void getSpoolFileToDOCX(String fileName, String spoolName) 
             throws PropertyVetoException, AS400Exception, 
             AS400SecurityException, ErrorCompletingRequestException, 
-            IOException, InterruptedException, RequestNotSupportedException, ObjectDoesNotExistException, SQLException{
+            IOException, InterruptedException, RequestNotSupportedException, 
+            ObjectDoesNotExistException, SQLException{
                 
         Logger.getLogger(IBMiConnector.class.getName()).log(Level.INFO, runCLCommand("CPYSPLF FILE(" + spoolName + ") TOFILE(" + curLib + "/" + DEFAULT_SPLF_NAME + ") JOB(" +
-                                _getLastPrintJobNumber() + "/" + currentJob.getStringValue(Job.CURRENT_USER) + "/QPRTJOB) SPLNBR(*LAST)"));
+                                getLastPrintJobNumber() + "/" + currentJob.getStringValue(Job.CURRENT_USER) + "/QPRTJOB) SPLNBR(*LAST)"));
         
         this.exportPhysicalFileToDOCX(fileName, curLib + "/" + DEFAULT_SPLF_NAME + "");
         Logger.getLogger(IBMiConnector.class.getName()).log(Level.INFO, runCLCommand("RMVM FILE(" + curLib + "/" + DEFAULT_SPLF_NAME + ") MBR(*ALL)"));
@@ -763,7 +901,6 @@ public class IBMiConnector {
         seqFile.close();
     }
     
-    
     public void exportPhysicalFileMemberAsXLSX(String libName, String fileName, String memberName, String outputPath) 
             throws AS400Exception, AS400SecurityException, 
             InterruptedException, IOException, PropertyVetoException {
@@ -800,7 +937,6 @@ public class IBMiConnector {
         
     
         }    
-
     
     public byte[] getIFSBinaryFile(String filePath) 
             throws AS400SecurityException, IOException {
@@ -837,7 +973,7 @@ public class IBMiConnector {
     public String runCLCommand(String commandString) 
             throws AS400SecurityException, ErrorCompletingRequestException, 
                     IOException, InterruptedException, PropertyVetoException, SQLException, ObjectDoesNotExistException {
-        return _runCLCommand(commandString, CL_COMMAND_EXEC_PLAIN/*CL_COMMAND_EXEC_QSHELL*/);
+        return _runCLCommand(commandString, CL_COMMAND_EXEC_PLAIN);
     }
     
     public String runCLCommand(String commandString, int executionType) 
@@ -877,27 +1013,52 @@ public class IBMiConnector {
                 AS400Text char3Converter = new AS400Text(3);
                 AS400Text charConverter = new AS400Text(commandToRun.length() + 10);
 
-                qp2shellParms[0] = new ProgramParameter(char22Converter.toBytes("/QOpenSys/usr/bin/csh\0"));
+                qp2shellParms[0] = new ProgramParameter(char22Converter.toBytes("/QOpenSys/usr/bin/qsh\0"));
                 qp2shellParms[1] = new ProgramParameter(char3Converter.toBytes("-c\0"));
                 qp2shellParms[2] = new ProgramParameter(charConverter.toBytes("system \"" + commandToRun + "\"\0"));
                 qp2shell.setProgram("/qsys.lib/qp2shell.pgm", qp2shellParms);
 
+                
                 if (!qp2shell.run())
                 {
                     Logger.getLogger(IBMiConnector.class.getName()).log(Level.SEVERE, "An unexpected error occured.");
-                    Logger.getLogger(IBMiConnector.class.getName()).log(Level.SEVERE, _stringFromAS400Message(qp2shell.getMessageList()));
+                    Logger.getLogger(IBMiConnector.class.getName()).log(Level.SEVERE, IBMiUtilities.stringFromAS400Message(qp2shell.getMessageList()));
                     return null;
                 }    
-                return _stringFromAS400Message(qp2shell.getMessageList());
+                return IBMiUtilities.stringFromAS400Message(qp2shell.getMessageList());
             case CL_COMMAND_EXEC_PLAIN: //using regular CL command call
             default:
                 CommandCall commandRun = new CommandCall(secure ? secureConnection : insecureConnection);
                 commandRun.setThreadSafe(false);
                 commandRun.run(commandToRun);
                 Logger.getLogger(IBMiConnector.class.getName()).log(Level.INFO, "Job " + commandString + " was executed. Job number " + commandRun.getServerJob().getNumber().toString());
-                return _stringFromAS400Message(commandRun.getMessageList());
+                return IBMiUtilities.stringFromAS400Message(commandRun.getMessageList());
         }        
     }   
+
+    public void runQShellCommand(String command) 
+            throws PropertyVetoException, AS400SecurityException, 
+            ErrorCompletingRequestException, IOException, 
+            InterruptedException, ObjectDoesNotExistException{
+    
+        ProgramCall qp2shell = new ProgramCall(secure ? secureConnection : insecureConnection);        
+        ProgramParameter[] qp2shellParms = new ProgramParameter[3];
+
+        AS400Text char22Converter = new AS400Text(22);
+        AS400Text char3Converter = new AS400Text(3);
+
+        qp2shellParms[0] = new ProgramParameter(char22Converter.toBytes("/QOpenSys/usr/bin/qsh\0"));
+        qp2shellParms[1] = new ProgramParameter(char3Converter.toBytes("-c\0"));
+        qp2shellParms[2] = new ProgramParameter(new AS400Text(command.length() + 1).toBytes(command + "\0"));
+        qp2shell.setProgram("/qsys.lib/qp2shell.pgm", qp2shellParms);
+
+        if (!qp2shell.run()) {                            
+            Logger.getLogger(IBMiConnector.class.getName()).log(Level.SEVERE, IBMiUtilities.stringFromAS400Message(qp2shell.getMessageList()));
+        }        
+    }
+
+    
+    
     public DefaultTableModel getAllAuthorisationLists() 
             throws AS400Exception, AS400SecurityException, 
             ErrorCompletingRequestException, InterruptedException, 
@@ -1099,7 +1260,7 @@ public class IBMiConnector {
             accessRights += (fileProperties[i].isHidden() ? "h" : "");
             
             newRow.addElement(accessRights);
-            newRow.addElement(_convertLongTimeToString(fileProperties[i].lastModified()));
+            newRow.addElement(IBMiUtilities.convertLongTimeToString(fileProperties[i].lastModified()));
             newRow.addElement(fileProperties[i].getName());
             rows.addElement(newRow);
         }
@@ -1259,6 +1420,7 @@ public class IBMiConnector {
         
         columnNames.addElement("Name");
         columnNames.addElement("Current value");
+        columnNames.addElement("Description");
         
         for (int i=0; i<list.size(); i++){
             Vector newRow = new Vector();
@@ -1268,13 +1430,14 @@ public class IBMiConnector {
                 String sysValString;
                 switch (sysVal.getType()) {
                     case SystemValueList.TYPE_ARRAY:
-                        sysValString = _stringFromArray((String[])sysVal.getValue(), " ");
-                        break;
-                    case SystemValueList.TYPE_DATE:
-                    case SystemValueList.TYPE_DECIMAL:
+                        sysValString = IBMiUtilities.stringFromArray((String[])sysVal.getValue(), " ");
+                        break;                   
+                    case SystemValueList.TYPE_DECIMAL:                       
                     case SystemValueList.TYPE_INTEGER:
+                        sysValString = String.valueOf(sysVal.getValue());
+                    case SystemValueList.TYPE_DATE:
                     case SystemValueList.TYPE_STRING:
-                        sysValString = sysVal.getValue().toString();
+                        sysValString = sysVal.getValue().toString().trim();
                         break;
                     default:
                         sysValString = "";
@@ -1284,6 +1447,7 @@ public class IBMiConnector {
             } catch (Exception ex) {
                 Logger.getLogger(IBMiConnector.class.getName()).log(Level.SEVERE, null, ex);
             }
+            newRow.addElement(sysVal.getDescription());
             rows.addElement(newRow);
         }
         
@@ -1311,8 +1475,7 @@ public class IBMiConnector {
         
         return runCLCommand("CHGUSRPRF USRPRF(" + userName.trim().toUpperCase() + ") PASSWORD(" + password.trim() + ")");
     }
-    
-    
+        
     public String getEncryptedPasswordFromHashString(String hashString, int passType){
         
         if (hashString.length()<538) 
@@ -1363,7 +1526,7 @@ public class IBMiConnector {
             //do nothing, it means that the procedure was already there.
         }
 
-        String userNameAS400 = padTextRight(userName.toUpperCase(), 10);
+        String userNameAS400 = IBMiUtilities.padTextRight(userName.toUpperCase(), 10);
                 
         String passwordAS400;
 
@@ -1445,7 +1608,7 @@ public class IBMiConnector {
         
         if (!qsygetph.run())
         {
-            Logger.getLogger(IBMiConnector.class.getName()).log(Level.SEVERE, _stringFromAS400Message(qsygetph.getMessageList()));
+            Logger.getLogger(IBMiConnector.class.getName()).log(Level.SEVERE, IBMiUtilities.stringFromAS400Message(qsygetph.getMessageList()));
             return null;
         }
         
@@ -1501,13 +1664,13 @@ public class IBMiConnector {
         
         if (!qsygetph.run())
         {
-            Logger.getLogger(IBMiConnector.class.getName()).log(Level.SEVERE, _stringFromAS400Message(qsygetph.getMessageList()));
+            Logger.getLogger(IBMiConnector.class.getName()).log(Level.SEVERE, IBMiUtilities.stringFromAS400Message(qsygetph.getMessageList()));
             return null;
         }
         
         return qsygetphParms[2].getOutputData();
     }    
-    
+
     public boolean _____setProfileHandleJDBC(byte[] profileHandle)
             throws PropertyVetoException, AS400SecurityException, 
                    ErrorCompletingRequestException, IOException, 
@@ -1521,7 +1684,6 @@ public class IBMiConnector {
             1	Profile Handle                  Input	Char(12)
             4	Error code                      I/O	Char(*)
          */
-        
         if (JDBCConnection == null) return false;
         
         JDBCStatement = JDBCConnection.createStatement();
@@ -1543,7 +1705,7 @@ public class IBMiConnector {
         }        
         return false;
     }
-    
+
     public boolean setProfileHandle(byte[] profileHandle)
             throws PropertyVetoException, AS400SecurityException, 
                    ErrorCompletingRequestException, IOException, 
@@ -1763,7 +1925,7 @@ public class IBMiConnector {
         
         if (!qsygenpt.run())
         {
-            Logger.getLogger(IBMiConnector.class.getName()).log(Level.SEVERE, _stringFromAS400Message(qsygenpt.getMessageList()));
+            Logger.getLogger(IBMiConnector.class.getName()).log(Level.SEVERE, IBMiUtilities.stringFromAS400Message(qsygenpt.getMessageList()));
             return null;
         }
         
@@ -1886,8 +2048,7 @@ public class IBMiConnector {
         
         return false;
     }
-    
-    
+        
     public boolean deescalatePrivileges()
         throws PropertyVetoException, AS400SecurityException, 
                    ErrorCompletingRequestException, IOException, 
@@ -1973,7 +2134,7 @@ public class IBMiConnector {
                 
         if (!qsyrupwd.run())
         {
-            Logger.getLogger(IBMiConnector.class.getName()).log(Level.SEVERE, _stringFromAS400Message(qsyrupwd.getMessageList()));
+            Logger.getLogger(IBMiConnector.class.getName()).log(Level.SEVERE, IBMiUtilities.stringFromAS400Message(qsyrupwd.getMessageList()));
             return null;
         }
         
@@ -2005,23 +2166,23 @@ public class IBMiConnector {
         
         switch (passType) {
             case PASSWORD_HASH_ALLDATA: // All data
-                return _hexStringFromEBCDIC(char500Converter.toBytes(qsyrupwdInfo[3])).substring(2,540);            
+                return IBMiUtilities.hexStringFromEBCDIC(char500Converter.toBytes(qsyrupwdInfo[3])).substring(2,540);            
             case PASSWORD_HASH_UNKNOWNHASH: // Unknown (hash?) data
-                return _hexStringFromEBCDIC(char500Converter.toBytes(qsyrupwdInfo[3])).substring(156,540);
+                return IBMiUtilities.hexStringFromEBCDIC(char500Converter.toBytes(qsyrupwdInfo[3])).substring(156,540);
             case PASSWORD_HASH_HMACSHA1MC: // HMAC-SHA1 password (mixed case)
-                return _hexStringFromEBCDIC(char500Converter.toBytes(qsyrupwdInfo[3])).substring(70,110);
+                return IBMiUtilities.hexStringFromEBCDIC(char500Converter.toBytes(qsyrupwdInfo[3])).substring(70,110);
             case PASSWORD_HASH_HMACSHA1UC: // HMAC-SHA1 password (uppercase)
-                return _hexStringFromEBCDIC(char500Converter.toBytes(qsyrupwdInfo[3])).substring(110,150);
+                return IBMiUtilities.hexStringFromEBCDIC(char500Converter.toBytes(qsyrupwdInfo[3])).substring(110,150);
             case PASSWORD_HASH_LMHASH: // LM hash
-                return _hexStringFromEBCDIC(char500Converter.toBytes(qsyrupwdInfo[3])).substring(34,66);
+                return IBMiUtilities.hexStringFromEBCDIC(char500Converter.toBytes(qsyrupwdInfo[3])).substring(34,66);
             case PASSWORD_HASH_DES: // Composed DES hash (PW_TOKENa XOR PW_TOKENb):
-                return composeDESHashFromTokens(_hexStringFromEBCDIC(char500Converter.toBytes(qsyrupwdInfo[3])).substring(2,18), 
-                                                _hexStringFromEBCDIC(char500Converter.toBytes(qsyrupwdInfo[3])).substring(18,34));
+                return composeDESHashFromTokens(IBMiUtilities.hexStringFromEBCDIC(char500Converter.toBytes(qsyrupwdInfo[3])).substring(2,18), 
+                                                IBMiUtilities.hexStringFromEBCDIC(char500Converter.toBytes(qsyrupwdInfo[3])).substring(18,34));
             case PASSWORD_HASH_SECONDDES: // Second DES password token (PW_TOKENb)
-                return _hexStringFromEBCDIC(char500Converter.toBytes(qsyrupwdInfo[3])).substring(18,34);
+                return IBMiUtilities.hexStringFromEBCDIC(char500Converter.toBytes(qsyrupwdInfo[3])).substring(18,34);
             case PASSWORD_HASH_FIRSTDES: // First DES password (PW_TOKENa)
             default: 
-                return _hexStringFromEBCDIC(char500Converter.toBytes(qsyrupwdInfo[3])).substring(2,18);
+                return IBMiUtilities.hexStringFromEBCDIC(char500Converter.toBytes(qsyrupwdInfo[3])).substring(2,18);
         }        
     }
     
@@ -2038,47 +2199,30 @@ public class IBMiConnector {
         return userList.getUsers();        
         
     }    
-    
-    private String composeDESHashFromTokens(String PW_TOKENa, String PW_TOKENb)
-    {
-        //This method is valid only for passwords longer than 8 chars (see RFC2877, 5.2).
-        if (PW_TOKENb.equals("4040404040404040"))
-            return PW_TOKENa;
-
-        long l_a = Long.parseUnsignedLong(PW_TOKENa, 16);
-        long l_b = Long.parseUnsignedLong(PW_TOKENb, 16);
-        long l_pwtoken = l_a ^ l_b;
-        return String.format("%016x", l_pwtoken).toUpperCase();
-    }
-    
-    public void getJohnPasswordsLM(String fileName) throws IOException
-    {
+        
+    public void getJohnPasswordsLM(String fileName) throws IOException{
         getJohnPasswords(PASSWORD_HASH_LMHASH, fileName);
     }
 
-    public void getJohnPasswordsDES(String fileName) throws IOException
-    {
+    public void getJohnPasswordsDES(String fileName) throws IOException{
         getJohnPasswords(PASSWORD_HASH_DES, fileName);
     }
     
-    public void getJohnPasswordsSHAUpperCase(String fileName) throws IOException
-    {
+    public void getJohnPasswordsSHAUpperCase(String fileName) throws IOException{
         getJohnPasswords(PASSWORD_HASH_HMACSHA1UC, fileName);
     }
     
-    public void getJohnPasswordsSHAMixedCase(String fileName) throws IOException
-    {
+    public void getJohnPasswordsSHAMixedCase(String fileName) throws IOException{
         getJohnPasswords(PASSWORD_HASH_HMACSHA1MC, fileName);
     }
 
-    public void getJohnPasswords(int passType, String fileName) throws IOException
-    {
+    public void getJohnPasswords(int passType, String fileName) throws IOException{
         DefaultTableModel pwdMatrix = null;
         User curUser;
         Enumeration allUsers;
         String curPassword;
         File outFile = new File(fileName);
-        prepareFile(fileName);
+        IBMiUtilities.prepareFile(fileName);
         BufferedWriter fileWriter = new BufferedWriter(new FileWriter(outFile));
         
         try {
@@ -2108,8 +2252,7 @@ public class IBMiConnector {
         fileWriter.close();                
     }
     
-    public DefaultTableModel getAuthorisationMatrix()
-    {
+    public DefaultTableModel getAuthorisationMatrix(){
         DefaultTableModel authMatrix = null;
         
         Vector columnNames = new Vector();
@@ -2272,7 +2415,7 @@ public class IBMiConnector {
             //grppf
             newRow.addElement(curUser.getGroupProfileName().toString());
             //supgrps
-            newRow.addElement((curUser.getSupplementalGroups().length == 0 ? "" : _stringFromArray(curUser.getSupplementalGroups(), " ")));
+            newRow.addElement((curUser.getSupplementalGroups().length == 0 ? "" : IBMiUtilities.stringFromArray(curUser.getSupplementalGroups(), " ")));
             //inmnu
             newRow.addElement(curUser.getInitialMenu().toString());
             //inpgm
@@ -2292,7 +2435,7 @@ public class IBMiConnector {
             //prtdev
             newRow.addElement(curUser.getPrintDevice().toString());
             //actionaudlvl
-            newRow.addElement(curUser.getUserActionAuditLevel() == null ? "" : _stringFromArray(curUser.getUserActionAuditLevel(), " "));
+            newRow.addElement(curUser.getUserActionAuditLevel() == null ? "" : IBMiUtilities.stringFromArray(curUser.getUserActionAuditLevel(), " "));
             //objaudval
             newRow.addElement(curUser.getObjectAuditingValue() == null ? "" : curUser.getObjectAuditingValue());
 
@@ -2316,10 +2459,17 @@ public class IBMiConnector {
         return authMatrix;
     }
 
-    public String getAuthorisationMatrix2() throws SQLException
-    {
+    public String getAuthorisationMatrix2() 
+            throws SQLException, AS400SecurityException, ErrorCompletingRequestException, 
+            InterruptedException, IOException, ObjectDoesNotExistException{
         String authMatrixName = "";
         
+        User runningUser = new User(secure ? secureConnection : insecureConnection, currentJob.getStringValue(Job.CURRENT_USER));
+        if (!(runningUser.hasSpecialAuthority("*ALLOBJ") && runningUser.hasSpecialAuthority("*SECADM"))){
+            Logger.getLogger(IBMiConnector.class.getName()).log(Level.SEVERE, "Insufficient privileges for this function. You need to have at least *ALLOBJ and *SECADM. Exiting.");            
+            return null;
+        }
+
         Vector columnNames = new Vector();
         Vector rows = new Vector();
         
@@ -2489,7 +2639,7 @@ public class IBMiConnector {
             //grppf
             newRow.addElement(curUser.getGroupProfileName().toString());
             //supgrps
-            newRow.addElement((curUser.getSupplementalGroups().length == 0 ? "" : _stringFromArray(curUser.getSupplementalGroups(), " ")));
+            newRow.addElement((curUser.getSupplementalGroups().length == 0 ? "" : IBMiUtilities.stringFromArray(curUser.getSupplementalGroups(), " ")));
             //inmnu
             newRow.addElement(curUser.getInitialMenu().toString());
             //inpgm
@@ -2509,7 +2659,7 @@ public class IBMiConnector {
             //prtdev
             newRow.addElement(curUser.getPrintDevice().toString());
             //actionaudlvl
-            newRow.addElement(curUser.getUserActionAuditLevel() == null ? "" : _stringFromArray(curUser.getUserActionAuditLevel(), " "));
+            newRow.addElement(curUser.getUserActionAuditLevel() == null ? "" : IBMiUtilities.stringFromArray(curUser.getUserActionAuditLevel(), " "));
             //objaudval
             newRow.addElement(curUser.getObjectAuditingValue() == null ? "" : curUser.getObjectAuditingValue());
 
@@ -2535,7 +2685,7 @@ public class IBMiConnector {
 
         return authMatrixName;
     }
-
+    
     public Enumeration getObjectPrivileges(String objectPath) 
             throws AS400Exception, AS400SecurityException, ConnectionDroppedException, 
             ErrorCompletingRequestException, InterruptedException, IOException, 
@@ -2608,14 +2758,14 @@ public class IBMiConnector {
             switch (detailedQSYSperm.getGroupIndicator()) {
                 case QSYSPermission.GROUPINDICATOR_SPECIALVALUE:
                 case QSYSPermission.GROUPINDICATOR_USER: 
-                    outputString += padTextRight(detailedQSYSperm.getUserID(), 10) + "            ";                                                                                        
+                    outputString += IBMiUtilities.padTextRight(detailedQSYSperm.getUserID(), 10) + "            ";                                                                                        
                     break;
                 case QSYSPermission.GROUPINDICATOR_GROUP: 
-                    outputString += "*GROUP     " + padTextRight(detailedQSYSperm.getUserID(), 10) + " ";                                                                                        
+                    outputString += "*GROUP     " + IBMiUtilities.padTextRight(detailedQSYSperm.getUserID(), 10) + " ";                                                                                        
                     break;                                                    
             }
             
-            outputString += padTextRight(detailedQSYSperm.getObjectAuthority(), 9) + " ";
+            outputString += IBMiUtilities.padTextRight(detailedQSYSperm.getObjectAuthority(), 9) + " ";
             outputString += (detailedQSYSperm.isOperational() ? "X" : " ") + "  ";
             outputString += (detailedQSYSperm.isManagement()? "X" : " ") + "  ";
             outputString += (detailedQSYSperm.isExistence()? "X" : " ") + "  ";
@@ -2664,10 +2814,10 @@ public class IBMiConnector {
             switch (detailedDLOperm.getGroupIndicator()) {
                 case DLOPermission.GROUPINDICATOR_SPECIALVALUE:
                 case DLOPermission.GROUPINDICATOR_USER: 
-                    outputString += padTextRight(detailedDLOperm.getUserID(), 10) + "            ";                                                                                        
+                    outputString += IBMiUtilities.padTextRight(detailedDLOperm.getUserID(), 10) + "            ";                                                                                        
                     break;
                 case DLOPermission.GROUPINDICATOR_GROUP: 
-                    outputString += "*GROUP     " + padTextRight(detailedDLOperm.getUserID(), 10) + " ";                                                                                        
+                    outputString += "*GROUP     " + IBMiUtilities.padTextRight(detailedDLOperm.getUserID(), 10) + " ";                                                                                        
                     break;                                                    
             }
             outputString += detailedDLOperm.getDataAuthority() + "\n";
@@ -2710,14 +2860,14 @@ public class IBMiConnector {
             switch (detailedRootPerm.getGroupIndicator()) {
                 case RootPermission.GROUPINDICATOR_SPECIALVALUE:
                 case RootPermission.GROUPINDICATOR_USER: 
-                    outputString += padTextRight(detailedRootPerm.getUserID(), 10) + "            ";                                                                                        
+                    outputString += IBMiUtilities.padTextRight(detailedRootPerm.getUserID(), 10) + "            ";                                                                                        
                     break;
                 case RootPermission.GROUPINDICATOR_GROUP: 
-                    outputString += "*GROUP     " + padTextRight(detailedRootPerm.getUserID(), 10) + " ";                                                                                        
+                    outputString += "*GROUP     " + IBMiUtilities.padTextRight(detailedRootPerm.getUserID(), 10) + " ";                                                                                        
                     break;                                                    
             }
             
-            outputString += padTextRight(detailedRootPerm.getDataAuthority(), 9) + " ";
+            outputString += IBMiUtilities.padTextRight(detailedRootPerm.getDataAuthority(), 9) + " ";
             outputString += (detailedRootPerm.isManagement()? "X" : " ") + "  ";
             outputString += (detailedRootPerm.isExistence()? "X" : " ") + "  ";
             outputString += (detailedRootPerm.isAlter() ? "X" : " ") + "  ";
@@ -2787,11 +2937,624 @@ public class IBMiConnector {
         
         return true;
     }
+        
+    private String getIFSDirectoryStructure(final String dbName, String path) throws SQLException {
+                              
+        IFSJavaFile ifsJavaFile = new IFSJavaFile((secure ? secureConnection : insecureConnection), path);
+        
+        Vector dirData = new Vector();
+        dirData.addElement(path);
+        dirData.addElement(String.valueOf(ifsJavaFile.canRead()));
+        dirData.addElement(String.valueOf(ifsJavaFile.canWrite()));
+        dirData.addElement(String.valueOf(ifsJavaFile.canExecute()));
+        dbTempConnection.insertrow(dbName, dirData);
+        
+        try {
+            File[] ifsJavaFiles = ifsJavaFile.listFiles();
+            for (final File ifsJavaFileEntry : ifsJavaFiles) {
+   /*             if (ifsJavaFileEntry.isDirectory()) {
+                    Thread t = new Thread(new Runnable() { public void run() { 
+                        try {       
+                            getIFSDirectoryStructure(dbName, ifsJavaFileEntry.getAbsolutePath());
+                        } catch (SQLException ex) {
+                        }
+                    }});
+                    t.start();
+                }*/
+            }
+        } catch (Exception e) {
+        }        
+        return null;
+    }
+    
+    public String getIFSDirectoryStructure() throws SQLException {
+        
+        if (insecureConnection==null && secureConnection==null)
+            return null;
+        
+        String dbName = dbTempConnection.createTempTable("IFSDirStructure", 4);
+        /*
+            DB structure: Full path, r, w, x
+        */        
+        return getIFSDirectoryStructure(dbName, "/");
+    }
+    
+    public String getExitPointInfo() 
+            throws PropertyVetoException, AS400SecurityException, 
+            ErrorCompletingRequestException, IOException, InterruptedException, 
+            ObjectDoesNotExistException, SQLException{
+        
+        if (insecureConnection==null && secureConnection==null)
+            return null;
 
+        /*
+
+        Retrieve Exit Information (QUSRTVEI) API
+
+          Required Parameter Group:
+
+        1 	Continuation handle                     Input 	Char(16)
+        2 	Receiver variable                       Output 	Char(*)
+        3 	Length of receiver variable             Input 	Binary(4)
+        4 	Format name                             Input 	Char(8)
+        5 	Exit point name                         Input 	Char(20)
+        6 	Exit point format name                  Input 	Char(8)
+        7 	Exit program number                     Input 	Binary(4)
+        8 	Exit program selection criteria 	Input 	Char(*)
+        9 	Error code                              I/O 	Char(*)
+        
+        */
+        
+        AS400Text char8Converter = new AS400Text(8);
+        AS400Text char16Converter = new AS400Text(16);    
+        AS400Text char20Converter = new AS400Text(20);    
+        AS400Bin4 bin4 = new AS400Bin4(); 
+        
+        String[] exitPgmTableColumns = {"ExitPointName", "ExitPointFormatName", "RegisteredExitPoint", 
+                                        "CompleteEntry", "ExitProgramNumber", "ExitProgramName", 
+                                        "ExitProgramLibraryName", "ExitProgramDescriptionIndicator", 
+                                        "ExitProgramDescriptionMessageFileName", 
+                                        "ExitProgramDescriptionMessageFileLibraryName", 
+                                        "ExitProgramDescriptionMessageID", "ExitProgramTextDescription",
+                                        "Threadsafe", "MultithreadedJobAction", "QLMTTHDACNSystemValue", 
+                                        "ExitProgramData"};
+        String outputTableName = dbTempConnection.createTempTable("exitpgminfo", exitPgmTableColumns);
+
+        /*
+        EXTI0300 Format
+
+        Offset 	Type 	Field
+        Dec 	Hex
+        0 	0 	BINARY(4) 	Bytes returned
+        4 	4 	BINARY(4) 	Bytes available
+        8 	8 	CHAR(16) 	Continuation handle
+        24 	18 	BINARY(4) 	Offset to first exit program entry
+        28 	1C 	BINARY(4) 	Number of exit program entries returned
+        32 	20 	BINARY(4) 	Length of exit program entry
+        36 	24 	CHAR(*) 	Reserved
+        Note: Exit program entry information. These fields are repeated for each exit program entry returned.
+                        BINARY(4) 	Offset to next exit program entry
+                        CHAR(20) 	Exit point name
+                        CHAR(8) 	Exit point format name
+                        CHAR(1) 	Registered exit point
+                        CHAR(1) 	Complete entry
+                        CHAR(2) 	Reserved
+                        BINARY(4) 	Exit program number
+                        CHAR(10) 	Exit program name
+                        CHAR(10) 	Exit program library name
+                        CHAR(1) 	Exit program description indicator
+                        CHAR(10) 	Exit program description message file name
+                        CHAR(10) 	Exit program description message file library name
+                        CHAR(7) 	Exit program description message ID
+                        CHAR(50) 	Exit program text description
+                        CHAR(2) 	Reserved
+                        BINARY(4) 	Exit program data CCSID
+                        BINARY(4) 	Offset to exit program data
+                        BINARY(4) 	Length of exit program data	
+                        CHAR(1) 	Threadsafe	
+                        CHAR(1) 	Multithreaded job action	
+                        CHAR(1) 	QMLTTHDACN system value	
+                        CHAR(1) 	Reserved	
+                        CHAR(*) 	Reserved	
+                        CHAR(*) 	Exit program data
+        */
+        
+        AS400DataType[] qusrtveiExitProgramDataType = new AS400DataType[]{
+            new AS400Bin4(),	//Offset to next exit program entry
+            new AS400Text(20),  //Exit point name
+            new AS400Text(8),	//Exit point format name
+            new AS400Text(1),   //Registered exit point
+            new AS400Text(1),   //Complete entry
+            new AS400Text(2),   //Reserved
+            new AS400Bin4(),    //Exit program number
+            new AS400Text(10),  //Exit program name
+            new AS400Text(10),  //Exit program library name
+            new AS400Text(1),   //Exit program description indicator
+            new AS400Text(10),  //Exit program description message file name
+            new AS400Text(10),  //Exit program description message file library name
+            new AS400Text(7),   //Exit program description message ID
+            new AS400Text(50),  //Exit program text description
+            new AS400Text(2),   //Reserved
+            new AS400Bin4(),    //Exit program data CCSID
+            new AS400Bin4(),    //Offset to exit program data
+            new AS400Bin4(),    //Length of exit program data
+            new AS400Text(1),   //Threadsafe
+            new AS400Text(1),   //Multithreaded job action
+            new AS400Text(1),   //QMLTTHDACN system value
+            new AS400Text(1)    //Reserved
+            //followed by CHAR(*) - Reserved and CHAR(*) - Exit Program Data
+        };
+        
+        AS400DataType[] qusrtveiHeaderDataType = new AS400DataType[]{
+            new AS400Bin4(),    //Bytes returned            
+            new AS400Bin4(),    //Bytes available
+            new AS400Text(16),  //Continuation handle            
+            new AS400Bin4(),    //Offset to first exit program entry
+            new AS400Bin4(),    //Number of exit program entries returned
+            new AS400Bin4()     //Length of exit program entry            
+        };
+        
+        String handle = "                "; //For first call, must be 16 blanks
+        
+        do {
+            ProgramParameter[] qusrtveiParms = new ProgramParameter[9];        
+            qusrtveiParms[0] = new ProgramParameter(char16Converter.toBytes(handle));
+            qusrtveiParms[0].setParameterType(ProgramParameter.PASS_BY_REFERENCE);
+            qusrtveiParms[1] = new ProgramParameter(65536);
+            qusrtveiParms[1].setParameterType(ProgramParameter.PASS_BY_REFERENCE);
+            qusrtveiParms[2] = new ProgramParameter(bin4.toBytes(65536));
+            qusrtveiParms[2].setParameterType(ProgramParameter.PASS_BY_REFERENCE);
+            qusrtveiParms[3] = new ProgramParameter(char8Converter.toBytes("EXTI0300"));
+            qusrtveiParms[3].setParameterType(ProgramParameter.PASS_BY_REFERENCE);
+            qusrtveiParms[4] = new ProgramParameter(char20Converter.toBytes("*ALL                "));
+            qusrtveiParms[4].setParameterType(ProgramParameter.PASS_BY_REFERENCE);
+            qusrtveiParms[5] = new ProgramParameter(char8Converter.toBytes("*ALL    "));
+            qusrtveiParms[5].setParameterType(ProgramParameter.PASS_BY_REFERENCE);
+            qusrtveiParms[6] = new ProgramParameter(bin4.toBytes(-1));
+            qusrtveiParms[6].setParameterType(ProgramParameter.PASS_BY_REFERENCE);
+            qusrtveiParms[7] = new ProgramParameter(bin4.toBytes(0));
+            qusrtveiParms[7].setParameterType(ProgramParameter.PASS_BY_REFERENCE);
+            byte[] errorBytes = new byte[32];
+            qusrtveiParms[8] = new ProgramParameter(errorBytes, 32);
+            qusrtveiParms[8].setParameterType(ProgramParameter.PASS_BY_REFERENCE);
+
+            ProgramCall qusrtvei = new ProgramCall(secure ? secureConnection : insecureConnection,
+                                        "/qsys.lib/qusrtvei.pgm", qusrtveiParms);   
+
+            if (!qusrtvei.run()) {                            
+                Logger.getLogger(IBMiConnector.class.getName()).log(Level.INFO, IBMiUtilities.stringFromAS400Message(qusrtvei.getMessageList()));
+                return null;
+            }
+
+            byte[] outputData = qusrtveiParms[1].getOutputData();
+            
+            AS400Structure returnedHeaderDataConverter = new AS400Structure(qusrtveiHeaderDataType);
+            Object[] returnedHeader = (Object[]) returnedHeaderDataConverter.toObject(Arrays.copyOfRange(outputData, 0, IBMiUtilities.sumDataTypeFields(qusrtveiHeaderDataType)), 0);
+            
+            handle = returnedHeader[2].toString();
+            
+            // If not exit point data found in this list, do not process output (it's empty)
+            int numEntries = (int)returnedHeader[4];
+            if (numEntries == 0)
+                break; 
+                                    
+            int entryOffset = (int)returnedHeader[3];
+
+            AS400Structure returnedExitProgramDataConverter = new AS400Structure(qusrtveiExitProgramDataType);
+            Object[] returnedExitProgram;            
+            
+            for (int i=0; i<numEntries; i++){
+                returnedExitProgram = (Object[]) returnedExitProgramDataConverter.toObject(Arrays.copyOfRange(outputData, entryOffset, entryOffset + IBMiUtilities.sumDataTypeFields(qusrtveiExitProgramDataType)), 0);                
+
+                Vector arrayData = new Vector();
+                //Exit point name
+                arrayData.addElement(returnedExitProgram[1].toString());
+                //Exit point format name
+                arrayData.addElement(returnedExitProgram[2].toString());
+                //Registered exit point
+                arrayData.addElement(returnedExitProgram[3].toString());
+                //Complete entry
+                arrayData.addElement(returnedExitProgram[4].toString());
+                //Exit program number
+                arrayData.addElement(String.valueOf((int)returnedExitProgram[6]));
+                //Exit program name
+                arrayData.addElement(returnedExitProgram[7].toString());
+                //Exit program library name
+                arrayData.addElement(returnedExitProgram[8].toString());
+                //Exit program description indicator
+                arrayData.addElement(returnedExitProgram[9].toString());
+                //Exit program description message file name
+                arrayData.addElement(returnedExitProgram[10].toString());
+                //Exit program description message file library name
+                arrayData.addElement(returnedExitProgram[11].toString());
+                //Exit program description message ID
+                arrayData.addElement(returnedExitProgram[12].toString());
+                //Exit program text description
+                arrayData.addElement(returnedExitProgram[13].toString());
+                //Threadsafe
+                arrayData.addElement(returnedExitProgram[18].toString());
+                //Multithreaded job action
+                arrayData.addElement(returnedExitProgram[19].toString());
+                //QLMTTHDACN system value
+                arrayData.addElement(returnedExitProgram[20].toString());
+                //Exit program data
+                arrayData.addElement((String)(new AS400Text((int)returnedExitProgram[16], (int)returnedExitProgram[15])).toObject(Arrays.copyOfRange(outputData, (int)returnedExitProgram[17], (int)returnedExitProgram[17] + (int)returnedExitProgram[16])));
+                
+                dbTempConnection.insertrow(outputTableName, arrayData);
+                
+                entryOffset = (int)returnedExitProgram[0];
+            }
+        } while (!handle.equals("                "));
+        
+        return outputTableName;        
+    }
+
+    
+    public String getFunctionUsageInfo(String FunctionID) 
+            throws PropertyVetoException, AS400SecurityException, 
+            ErrorCompletingRequestException, IOException, InterruptedException, 
+            ObjectDoesNotExistException, SQLException{
+        return getFunctionUsageInfo("", FunctionID);
+    }
+    
+    public String getFunctionUsageInfo(String tableName, String FunctionID) 
+            throws PropertyVetoException, AS400SecurityException, 
+            ErrorCompletingRequestException, IOException, InterruptedException, 
+            ObjectDoesNotExistException, SQLException{
+        
+        if (insecureConnection==null && secureConnection==null)
+            return null;
+
+        /*
+
+            Retrieve Function Usage Information (QSYRTFUI) API
+
+              Required Parameter Group for QSYRTFUI:
+
+            1 	Receiver variable 	Output 	Char(*)
+            2 	Length of receiver variable 	Input 	Binary(4)
+            3 	Format name 	Input 	Char(8)
+            4 	Function ID 	Input 	Char(30)
+            5 	Error code 	I/O 	Char(*)
+        
+        */
+        
+        AS400Text char8Converter = new AS400Text(8);
+        AS400Text char30Converter = new AS400Text(30);    
+        AS400Bin4 bin4 = new AS400Bin4(); 
+        
+        String[] functionUsageTableColumns = {"FunctionID", "UserProfileName", "UsageSetting", 
+                                        "UserProfileType"};
+        
+        String outputTableName = (tableName.equals("") ? dbTempConnection.createTempTable("fcnusageinfo-" + FunctionID, functionUsageTableColumns) 
+                                                  : tableName);
+
+        /*
+        FNUI0100 Format
+
+        Offset 	Type 	Field
+        Dec 	Hex
+        0 	0 	BINARY(4) 	Bytes returned
+        4 	4 	BINARY(4) 	Bytes available
+        8 	8 	BINARY(4) 	Offset to first function usage entry
+        12 	C 	BINARY(4) 	Number of function usage entries returned
+        16 	10 	BINARY(4) 	Length of function usage entry
+        20 	14 	CHAR(*) 	Reserved
+        Function usage entry information. These fields are repeated for each function usage entry returned.
+  	  	CHAR(10) 	User profile name
+  	  	CHAR(1) 	Usage setting
+  	  	CHAR(1) 	User profile type
+  	  	CHAR(*) 	Reserved
+        */
+        
+        AS400DataType[] qsyrtfuiFunctionUsageDataType = new AS400DataType[]{
+            new AS400Text(10),	//User profile name
+            new AS400Text(1),	//Usage setting
+            new AS400Text(1),	//User profile type
+            //followed by CHAR(*) - Reserved
+        };
+        
+        AS400DataType[] qsyrtfuiHeaderDataType = new AS400DataType[]{
+            new AS400Bin4(),    //Bytes returned            
+            new AS400Bin4(),    //Bytes available
+            new AS400Bin4(),    //Offset to first function usage entry
+            new AS400Bin4(),    //Number of function usage entries returned
+            new AS400Bin4()     //Length of function usage entry            
+        };
+        
+        ProgramParameter[] qsyrtfuiParms = new ProgramParameter[5];        
+        qsyrtfuiParms[0] = new ProgramParameter(65536);
+        qsyrtfuiParms[0].setParameterType(ProgramParameter.PASS_BY_REFERENCE);
+        qsyrtfuiParms[1] = new ProgramParameter(bin4.toBytes(65536));
+        qsyrtfuiParms[1].setParameterType(ProgramParameter.PASS_BY_REFERENCE);
+        qsyrtfuiParms[2] = new ProgramParameter(char8Converter.toBytes("FNUI0100"));
+        qsyrtfuiParms[2].setParameterType(ProgramParameter.PASS_BY_REFERENCE);
+        qsyrtfuiParms[3] = new ProgramParameter(char30Converter.toBytes(FunctionID));
+        qsyrtfuiParms[3].setParameterType(ProgramParameter.PASS_BY_REFERENCE);
+        byte[] errorBytes = new byte[32];
+        qsyrtfuiParms[4] = new ProgramParameter(errorBytes, 32);
+        qsyrtfuiParms[4].setParameterType(ProgramParameter.PASS_BY_REFERENCE);
+        ProgramCall qsyrtfui = new ProgramCall(secure ? secureConnection : insecureConnection,
+                                  "/qsys.lib/qsyrtfui.pgm", qsyrtfuiParms);   
+        if (!qsyrtfui.run()) {                            
+            Logger.getLogger(IBMiConnector.class.getName()).log(Level.INFO, IBMiUtilities.stringFromAS400Message(qsyrtfui.getMessageList()));
+            return null;
+        }
+        byte[] outputData = qsyrtfuiParms[0].getOutputData();
+        
+        AS400Structure returnedHeaderDataConverter = new AS400Structure(qsyrtfuiHeaderDataType);
+        Object[] returnedHeader = (Object[]) returnedHeaderDataConverter.toObject(Arrays.copyOfRange(outputData, 0, IBMiUtilities.sumDataTypeFields(qsyrtfuiHeaderDataType)), 0);
+                
+        // If not exit point data found in this list, do not process output (it's empty)
+        int numEntries = (int)returnedHeader[3];
+        if (numEntries == 0)
+            return null; 
+                                
+        int entryOffset = (int)returnedHeader[2];
+        AS400Structure returnedFunctionUsageDetailsDataConverter = new AS400Structure(qsyrtfuiFunctionUsageDataType);
+        Object[] returnedFunctionUsageDetails;            
+            
+        for (int i=0; i<numEntries; i++){
+            returnedFunctionUsageDetails = (Object[]) returnedFunctionUsageDetailsDataConverter.toObject(Arrays.copyOfRange(outputData, entryOffset, entryOffset + IBMiUtilities.sumDataTypeFields(qsyrtfuiFunctionUsageDataType)), 0);                
+            Vector arrayData = new Vector();
+            //Function ID
+            arrayData.addElement(FunctionID);
+            //User profile name
+            arrayData.addElement(returnedFunctionUsageDetails[0].toString());
+            //Usage setting
+            arrayData.addElement(returnedFunctionUsageDetails[1].toString());
+            //User profile type
+            arrayData.addElement(returnedFunctionUsageDetails[2].toString());
+               
+            dbTempConnection.insertrow(outputTableName, arrayData);
+                
+            entryOffset += (int)returnedHeader[4];
+        }
+        
+        return outputTableName;        
+    }
+    
+    public String getFunctionUsageInfo() 
+            throws PropertyVetoException, AS400SecurityException, 
+            ErrorCompletingRequestException, IOException, InterruptedException, 
+            ObjectDoesNotExistException, SQLException{
+        
+        if (insecureConnection==null && secureConnection==null)
+            return null;
+
+        /*
+
+            Retrieve Function Information (QSYRTVFI) API
+
+              Required Parameter Group for QSYRTVFI:
+
+            1 	Continuation handle 	Input 	Char(20)
+            2 	Receiver variable 	Output 	Char(*)
+            3 	Length of receiver variable 	Input 	Binary(4)
+            4 	Format name 	Input 	Char(8)
+            5 	Function selection criteria 	Input 	Char(*)
+            6 	Desired CCSID 	Input 	Binary(4)
+            7 	Error code 	I/O 	Char(*)        
+        */
+        
+        AS400Text char8Converter = new AS400Text(8);
+        AS400Text char20Converter = new AS400Text(20);    
+        AS400Bin4 bin4 = new AS400Bin4(); 
+        
+        String[] functionUsageTableColumns = {"FunctionID", "FunctionCategory", "FunctionType", 
+                                        "FunctionNameMessagefileName", "FunctionNameMessagefileLibraryName", 
+                                        "FunctionNameMessageID", "FunctionNameMessageText", "FunctionName", 
+                                        "FunctionDescriptionMessagefileName", 
+                                        "FunctionDescriptionMessagefileLibraryName", 
+                                        "FunctionDescriptionMessageID", "FunctionDescriptionMessageText", 
+                                        "FunctionDescription", "FunctionProductID", "FunctionGroupID", 
+                                        "DefaultUsage", "ALLOBJIndicator", "UsageInformationIndicator"};
+        String outputTableName = dbTempConnection.createTempTable("fcnusageinfo", functionUsageTableColumns);
+
+        String[] functionUsageDetailsTableColumns = {"FunctionID", "UserProfileName", "UsageSetting", 
+                                        "UserProfileType"};
+        String outputDetailsTableName = dbTempConnection.createTempTable("fcnusageinfodetails", functionUsageDetailsTableColumns);
+        
+        /*
+        FCNI0100 Format
+
+        Offset 	Type 	Field
+        Dec 	Hex
+        0 	0 	BINARY(4) 	Bytes returned
+        4 	4 	BINARY(4) 	Bytes available
+        8 	8 	CHAR(20) 	Continuation handle
+        28 	1C 	BINARY(4) 	Offset to first function entry
+        32 	20 	BINARY(4) 	Number of function entries returned
+        36 	24 	BINARY(4) 	Length of function entry
+        40 	28 	CHAR(*) 	Reserved
+        Function entry information. These fields are repeated for each function entry returned.
+  	  	CHAR(30) 	Function ID
+  	  	CHAR(1) 	Function category
+  	  	CHAR(1) 	Function type
+  	  	CHAR(10) 	Function-name message-file name
+  	  	CHAR(10) 	Function-name message-file library name
+  	  	CHAR(7) 	Function-name message ID
+  	  	CHAR(330) 	Function-name message text
+  	  	CHAR(3) 	Reserved
+  	  	BINARY(4) 	Function-name message-text CCSID
+  	  	CHAR(330) 	Function name
+  	  	CHAR(2) 	Reserved
+  	  	BINARY(4) 	Function name CCSID
+  	  	CHAR(10) 	Function-description message-file name
+  	  	CHAR(10) 	Function-description message-file library name
+  	  	CHAR(7) 	Function-description message ID
+  	  	CHAR(330) 	Function-description message text
+  	  	CHAR(3) 	Reserved
+  	  	BINARY(4) 	Function-description message text CCSID
+  	  	CHAR(330) 	Function description
+  	  	CHAR(2) 	Reserved
+  	  	BINARY(4) 	Function description CCSID
+  	  	CHAR(30) 	Function product ID
+  	  	CHAR(30) 	Function group ID
+  	  	CHAR(1) 	Default usage
+  	  	CHAR(1) 	*ALLOBJ indicator
+  	  	CHAR(1) 	Usage information indicator
+  	  	CHAR(*) 	Reserved
+        */
+        
+        AS400DataType[] qsyrtvfiFunctionUsageDataType = new AS400DataType[]{
+            new AS400Text(30),	//Function ID
+            new AS400Text(1),	//Function category
+            new AS400Text(1),	//Function type
+            new AS400Text(10),	//Function-name message-file name
+            new AS400Text(10),	//Function-name message-file library name
+            new AS400Text(7),	//Function-name message ID
+            new AS400Text(330),	//Function-name message text
+            new AS400Text(3),	//Reserved
+            new AS400Bin4(),	//Function-name message-text CCSID
+            new AS400Text(330),	//Function name
+            new AS400Text(2),	//Reserved
+            new AS400Bin4(),	//Function name CCSID
+            new AS400Text(10),	//Function-description message-file name
+            new AS400Text(10),	//Function-description message-file library name
+            new AS400Text(7),	//Function-description message ID
+            new AS400Text(330),	//Function-description message text
+            new AS400Text(3),	//Reserved
+            new AS400Bin4(),	//Function-description message text CCSID
+            new AS400Text(330),	//Function description
+            new AS400Text(2),	//Reserved
+            new AS400Bin4(),	//Function description CCSID
+            new AS400Text(30),	//Function product ID
+            new AS400Text(30),	//Function group ID
+            new AS400Text(1),	//Default usage
+            new AS400Text(1),	//*ALLOBJ indicator
+            new AS400Text(1)	//Usage information indicator
+            //followed by CHAR(*) - Reserved
+        };
+        
+        AS400DataType[] qsyrtvfiHeaderDataType = new AS400DataType[]{
+            new AS400Bin4(),    //Bytes returned            
+            new AS400Bin4(),    //Bytes available
+            new AS400Text(20),  //Continuation handle            
+            new AS400Bin4(),    //Offset to first function entry
+            new AS400Bin4(),    //Number of function entries returned
+            new AS400Bin4()     //Length of function entry            
+        };
+        
+        String handle = "                    "; //For first call, must be 20 blanks
+        
+        do {
+            ProgramParameter[] qsyrtvfiParms = new ProgramParameter[7];        
+            qsyrtvfiParms[0] = new ProgramParameter(char20Converter.toBytes(handle));
+            qsyrtvfiParms[0].setParameterType(ProgramParameter.PASS_BY_REFERENCE);
+            qsyrtvfiParms[1] = new ProgramParameter(65536);
+            qsyrtvfiParms[1].setParameterType(ProgramParameter.PASS_BY_REFERENCE);
+            qsyrtvfiParms[2] = new ProgramParameter(bin4.toBytes(65536));
+            qsyrtvfiParms[2].setParameterType(ProgramParameter.PASS_BY_REFERENCE);
+            qsyrtvfiParms[3] = new ProgramParameter(char8Converter.toBytes("FCNI0100"));
+            qsyrtvfiParms[3].setParameterType(ProgramParameter.PASS_BY_REFERENCE);
+            qsyrtvfiParms[4] = new ProgramParameter(bin4.toBytes(0));
+            qsyrtvfiParms[4].setParameterType(ProgramParameter.PASS_BY_REFERENCE);
+            qsyrtvfiParms[5] = new ProgramParameter(bin4.toBytes(0));
+            qsyrtvfiParms[5].setParameterType(ProgramParameter.PASS_BY_REFERENCE);
+            byte[] errorBytes = new byte[32];
+            qsyrtvfiParms[6] = new ProgramParameter(errorBytes, 32);
+            qsyrtvfiParms[6].setParameterType(ProgramParameter.PASS_BY_REFERENCE);
+
+            ProgramCall qsyrtvfi = new ProgramCall(secure ? secureConnection : insecureConnection,
+                                        "/qsys.lib/qsyrtvfi.pgm", qsyrtvfiParms);   
+
+            if (!qsyrtvfi.run()) {                            
+                Logger.getLogger(IBMiConnector.class.getName()).log(Level.INFO, IBMiUtilities.stringFromAS400Message(qsyrtvfi.getMessageList()));
+                return null;
+            }
+
+            byte[] outputData = qsyrtvfiParms[1].getOutputData();
+            
+            AS400Structure returnedHeaderDataConverter = new AS400Structure(qsyrtvfiHeaderDataType);
+            Object[] returnedHeader = (Object[]) returnedHeaderDataConverter.toObject(Arrays.copyOfRange(outputData, 0, IBMiUtilities.sumDataTypeFields(qsyrtvfiHeaderDataType)), 0);
+            
+            handle = returnedHeader[2].toString();
+            
+            // If not exit point data found in this list, do not process output (it's empty)
+            int numEntries = (int)returnedHeader[4];
+            if (numEntries == 0)
+                break; 
+                                    
+            int entryOffset = (int)returnedHeader[3];
+
+            AS400Structure returnedFunctionUsageDataConverter = new AS400Structure(qsyrtvfiFunctionUsageDataType);
+            Object[] returnedFunctionUsage;            
+            
+            for (int i=0; i<numEntries; i++){
+                returnedFunctionUsage = (Object[]) returnedFunctionUsageDataConverter.toObject(Arrays.copyOfRange(outputData, entryOffset, entryOffset + IBMiUtilities.sumDataTypeFields(qsyrtvfiFunctionUsageDataType)), 0);                
+
+                Vector arrayData = new Vector();
+                //Function ID
+                arrayData.addElement(returnedFunctionUsage[0].toString());
+                //Function category
+                arrayData.addElement(returnedFunctionUsage[1].toString());
+                //Function type
+                arrayData.addElement(returnedFunctionUsage[2].toString());
+                //Function-name message-file name
+                arrayData.addElement(returnedFunctionUsage[3].toString());
+                //Function-name message-file library name
+                arrayData.addElement(returnedFunctionUsage[4].toString());
+                //Function-name message ID
+                arrayData.addElement(returnedFunctionUsage[5].toString());
+                //Function-name message text
+                arrayData.addElement(returnedFunctionUsage[6].toString());
+                //Function name
+                arrayData.addElement(returnedFunctionUsage[9].toString());
+                //Function-description message-file name
+                arrayData.addElement(returnedFunctionUsage[12].toString());
+                //Function-description message-file library name
+                arrayData.addElement(returnedFunctionUsage[13].toString());
+                //Function-description message ID
+                arrayData.addElement(returnedFunctionUsage[14].toString());
+                //Function-description message text
+                arrayData.addElement(returnedFunctionUsage[15].toString());
+                //Function description
+                arrayData.addElement(returnedFunctionUsage[18].toString());
+                //Function product ID
+                arrayData.addElement(returnedFunctionUsage[21].toString());
+                //Function group ID
+                arrayData.addElement(returnedFunctionUsage[22].toString());
+                //Default usage
+                arrayData.addElement(returnedFunctionUsage[23].toString());
+                //*ALLOBJ indicator
+                arrayData.addElement(returnedFunctionUsage[24].toString());
+                //Usage information indicator
+                arrayData.addElement(returnedFunctionUsage[25].toString());
+                
+                dbTempConnection.insertrow(outputTableName, arrayData);
+
+                //Get function usage details per function if it is an administrable function (Function Type=3)
+                if (returnedFunctionUsage[2].toString().equals("3"))
+                  getFunctionUsageInfo(outputDetailsTableName, returnedFunctionUsage[0].toString());
+                
+                entryOffset += (int)returnedHeader[5];
+            }
+        } while (!handle.equals("                    "));
+
+        String viewName = "fcnusagecomplete" + new SimpleDateFormat("YYMMddHHmmSS").format(new Date());
+        dbTempConnection.query("CREATE VIEW " + viewName + " AS SELECT "
+                                + outputTableName + ".FunctionID, FunctionCategory, FunctionType, "
+                                + "FunctionNameMessagefileName, FunctionNameMessagefileLibraryName, FunctionNameMessageID, "
+                                + "FunctionNameMessageText, FunctionName, FunctionDescriptionMessagefileName, "
+                                + "FunctionDescriptionMessagefileLibraryName, FunctionDescriptionMessageID, "
+                                + "FunctionDescriptionMessageText, FunctionDescription, FunctionProductID, "
+                                + "FunctionGroupID, DefaultUsage, ALLOBJIndicator, UsageInformationIndicator, "
+                                + "UserProfileName, UsageSetting, UserProfileType FROM "
+                                + outputTableName + " LEFT OUTER JOIN " + outputDetailsTableName + " ON "
+                                + outputTableName + ".FunctionID = "
+                                + outputDetailsTableName + ".FunctionID");
+               
+        return viewName;        
+    }
+            
     public String getNetStat() 
             throws PropertyVetoException, AS400SecurityException, 
             ErrorCompletingRequestException, IOException, InterruptedException, 
             ObjectDoesNotExistException, SQLException{
+        
+        if (insecureConnection==null && secureConnection==null)
+            return null;
 
         /*
     
@@ -2809,11 +3572,11 @@ public class IBMiConnector {
         */
 
         
-        createUserSpace("NETSTAT", curLib, "NETSTAT", 64000, "NETSTAT user space");
+        createUserSpace("NETSTAT", curLib, "NETSTAT", 1, "NETSTAT user space");
         if (!makeUserSpaceAutoExtendible("NETSTAT", curLib, true))
             return null;
 
-        String userSpaceName = _padTrimString("NETSTAT   " + curLib.toUpperCase(), 20);
+        String userSpaceName = IBMiUtilities.padTrimString("NETSTAT   " + curLib.toUpperCase(), 20);
 
         ProgramParameter[] qtocnetstsParms = new ProgramParameter[6];
 
@@ -2869,7 +3632,8 @@ public class IBMiConnector {
                                         "/qsys.lib/qtocnetsts.srvpgm", "QtocLstNetCnn",
                                         ServiceProgramCall.NO_RETURN_VALUE, qtocnetstsParms);                                
         if (!qtocnetsts.run()) {                            
-            Logger.getLogger(IBMiConnector.class.getName()).log(Level.INFO, _stringFromAS400Message(qtocnetsts.getMessageList()));
+            Logger.getLogger(IBMiConnector.class.getName()).log(Level.INFO, IBMiUtilities.stringFromAS400Message(qtocnetsts.getMessageList()));
+            return null;
         }
         
         /*
@@ -2918,7 +3682,1238 @@ public class IBMiConnector {
         
         return retrieveUserSpace("NETSTAT", curLib, netstatDataType);
     }
+
+    public String getARPTable() 
+            throws PropertyVetoException, AS400SecurityException, 
+            ErrorCompletingRequestException, IOException, InterruptedException, 
+            ObjectDoesNotExistException, SQLException{
+
+        String netIfacesTableName = getNetIfaces();
+        
+        if ((insecureConnection==null && secureConnection==null) || netIfacesTableName == null)
+            return null;
+        DefaultTableModel lineNames = dbTempConnection.query("SELECT DISTINCT _7 FROM " + netIfacesTableName + " WHERE _7 NOT LIKE \"*%\" AND _7 NOT LIKE \"\" AND _7 NOT NULL").toTableModel();
+        String[] arpTables = new String[lineNames.getRowCount()];
+        for (int i=0; i<lineNames.getRowCount(); i++){
+            arpTables[i] = getARPTable(lineNames.getValueAt(i, 0).toString());
+        }        
+        return dbTempConnection.unionTempTables(arpTables);
+    }
     
+    public String getARPTable(String lineName) 
+            throws PropertyVetoException, AS400SecurityException, 
+            ErrorCompletingRequestException, IOException, InterruptedException, 
+            ObjectDoesNotExistException, SQLException{
+        
+        if (insecureConnection==null && secureConnection==null)
+            return null;
+
+        /*
+    
+            List Physical Interface ARP Table (QtocLstPhyIfcARPTbl) API
+            Required Parameter Group:
+
+                1 	Qualified user space name 	Input 	Char(20)
+                2 	Format name                     Input 	Char(8)
+                3 	Line name                       Input 	Char(10)
+                4 	Error Code                      I/O 	Char(*)
+
+        
+        */
+
+        
+        createUserSpace("ARPTABLE", curLib, "ARPTABLE", 1, "ARPTABLE user space");
+        if (!makeUserSpaceAutoExtendible("ARPTABLE", curLib, true))
+            return null;
+
+        String userSpaceName = IBMiUtilities.padTrimString("ARPTABLE  " + curLib.toUpperCase(), 20);
+
+        ProgramParameter[] qtocnetstsParms = new ProgramParameter[4];
+
+        AS400Text char8Converter = new AS400Text(8);
+        AS400Text char20Converter = new AS400Text(20);    
+        AS400Text char10Converter = new AS400Text(10); 
+        
+        qtocnetstsParms[0] = new ProgramParameter(char20Converter.toBytes(userSpaceName));
+        qtocnetstsParms[0].setParameterType(ProgramParameter.PASS_BY_REFERENCE);
+        qtocnetstsParms[1] = new ProgramParameter(char8Converter.toBytes("ARPT0100"));
+        qtocnetstsParms[1].setParameterType(ProgramParameter.PASS_BY_REFERENCE);
+        qtocnetstsParms[2] = new ProgramParameter(char10Converter.toBytes(IBMiUtilities.padTrimString(lineName, 10)));
+        qtocnetstsParms[2].setParameterType(ProgramParameter.PASS_BY_REFERENCE);        
+        byte[] errorBytes = new byte[32];
+        qtocnetstsParms[3] = new ProgramParameter(errorBytes, 32);
+        qtocnetstsParms[3].setParameterType(ProgramParameter.PASS_BY_REFERENCE);
+
+        ServiceProgramCall qtocnetsts = new ServiceProgramCall(secure ? secureConnection : insecureConnection,
+                                        "/qsys.lib/qtocnetsts.srvpgm", "QtocLstPhyIfcARPTbl",
+                                        ServiceProgramCall.NO_RETURN_VALUE, qtocnetstsParms);                                
+        if (!qtocnetsts.run()) {                            
+            Logger.getLogger(IBMiConnector.class.getName()).log(Level.INFO, IBMiUtilities.stringFromAS400Message(qtocnetsts.getMessageList()));
+            return null;
+        }
+        
+        /*
+            ARPT0100 Format
+
+            Offset 	Type            Field
+            Dec 	Hex
+            0 	0 	CHAR(15) 	Internet address
+            15 	F 	CHAR(1) 	Reserved
+            16 	10 	BINARY(4) 	Internet address binary
+            20 	14 	BINARY(4) 	Line type
+            24 	18 	BINARY(4) 	Ethernet type
+            28 	1C 	BINARY(4) 	Type of entry
+            32 	20 	BINARY(4) 	Data link connection identifier (DLCI)
+            36 	24 	BINARY(4) 	Routing information field (RIF) valid mask
+            40 	28 	CHAR(18) 	Routing information field (RIF)
+            58 	3A 	CHAR(17) 	Physical address
+            75 	4B 	CHAR(1) 	Reserved
+        From V7R2:
+            76 	4C 	CHAR(10) 	Line name
+            86 	56 	CHAR(2) 	Reserved
+            88 	58 	BINARY(4) 	Virtual LAN identifier 
+        */
+        
+        AS400DataType[] arptableDataTypeV7R1 = new AS400DataType[]{
+            new AS400Text(15),
+            new AS400Text(1),
+            new AS400Bin4(),            
+            new AS400Bin4(),            
+            new AS400Bin4(),            
+            new AS400Bin4(),            
+            new AS400Bin4(),            
+            new AS400Bin4(),            
+            new AS400Text(18),
+            new AS400Text(17),
+            new AS400Text(1)
+        };
+
+        AS400DataType[] arptableDataTypeV7R2 = new AS400DataType[]{
+            new AS400Text(15),
+            new AS400Text(1),
+            new AS400Bin4(),            
+            new AS400Bin4(),            
+            new AS400Bin4(),            
+            new AS400Bin4(),            
+            new AS400Bin4(),            
+            new AS400Bin4(),            
+            new AS400Text(18),
+            new AS400Text(17),
+            new AS400Text(1),
+            new AS400Text(10),
+            new AS400Text(2),
+            new AS400Bin4()           
+        };
+        
+        if ((secure ? secureConnection : insecureConnection).getVRM() <= 0x00070100)
+           return retrieveUserSpace("ARPTABLE", curLib, arptableDataTypeV7R1);
+        else if ((secure ? secureConnection : insecureConnection).getVRM() > 0x00070100)
+           return retrieveUserSpace("NETROUTE", curLib, arptableDataTypeV7R2);
+        else
+           return null;
+    }
+
+    public String getSMBShares() 
+            throws PropertyVetoException, AS400SecurityException, 
+            ErrorCompletingRequestException, IOException, InterruptedException, 
+            ObjectDoesNotExistException, SQLException{
+        
+        if (insecureConnection==null && secureConnection==null)
+            return null;
+
+        /*
+        
+        List Server Information (QZLSLSTI) API
+
+          Required Parameter Group:
+
+        1 	Qualified user space name 	Input 	Char(20)
+        2 	Format                          Input 	Char(8)
+        3 	Information qualifier           Input 	Char(15)
+        4 	Error code                      I/O 	Char(*)
+
+          Optional Parameter 1:
+
+        5 	Session user                    Input 	Char(10)
+
+          Optional Parameter 2:
+
+        6 	Expanded workstation name 	Input 	Char(*) 
+        
+        */
+
+        
+        createUserSpace("SMBSHARES", curLib, "SMBSHARES", 1, "SMBSHARES user space");
+        if (!makeUserSpaceAutoExtendible("SMBSHARES", curLib, true))
+            return null;
+
+        String userSpaceName = IBMiUtilities.padTrimString("SMBSHARES " + curLib.toUpperCase(), 20);
+
+        ProgramParameter[] qzlslstiParms = new ProgramParameter[4];
+
+        AS400Text char8Converter = new AS400Text(8);
+        AS400Text char20Converter = new AS400Text(20);    
+        AS400Text char15Converter = new AS400Text(15); 
+        AS400Bin4 bin4 = new AS400Bin4();                                                                        
+        
+        qzlslstiParms[0] = new ProgramParameter(char20Converter.toBytes(userSpaceName));
+        qzlslstiParms[0].setParameterType(ProgramParameter.PASS_BY_REFERENCE);
+        qzlslstiParms[1] = new ProgramParameter(char8Converter.toBytes("ZLSL0100"));
+        qzlslstiParms[1].setParameterType(ProgramParameter.PASS_BY_REFERENCE);
+        qzlslstiParms[2] = new ProgramParameter(char15Converter.toBytes("*ALL           ")); 
+        qzlslstiParms[2].setParameterType(ProgramParameter.PASS_BY_REFERENCE);        
+        byte[] errorBytes = new byte[32];
+        qzlslstiParms[3] = new ProgramParameter(errorBytes, 32);
+        qzlslstiParms[3].setParameterType(ProgramParameter.PASS_BY_REFERENCE);
+
+        ProgramCall qzlslsti = new ProgramCall(secure ? secureConnection : insecureConnection,
+                                        "/qsys.lib/qzlslsti.pgm", qzlslstiParms);                                
+        if (!qzlslsti.run()) {                            
+            Logger.getLogger(IBMiConnector.class.getName()).log(Level.INFO, IBMiUtilities.stringFromAS400Message(qzlslsti.getMessageList()));
+            return null;
+        }
+        
+        /*
+            ZLSL0100 Format
+        
+           Offset 	Type            Field
+           Dec 	Hex
+           0 	0 	BINARY(4) 	Length of this entry
+           4 	4 	CHAR(12) 	Share name
+           16 	10 	BINARY(4) 	Device type
+           20 	14 	BINARY(4) 	Permissions
+           24 	18 	BINARY(4) 	Maximum users
+           28 	1C 	BINARY(4) 	Current users
+           32 	20 	BINARY(4) 	Spooled file type
+           36 	24 	BINARY(4) 	Offset to path name
+           40 	28 	BINARY(4) 	Length of path name
+           44 	2C 	CHAR(20) 	Qualified output queue
+           64 	40 	CHAR(50) 	Print driver type
+           114 	72 	CHAR(50) 	Text description
+           164 	A4 	CHAR(*) 	Path name
+        */
+        
+        AS400DataType[] qzlslstiDataType = new AS400DataType[]{
+            new AS400Bin4(),            
+            new AS400Text(12),
+            new AS400Bin4(),            
+            new AS400Bin4(),            
+            new AS400Bin4(),            
+            new AS400Bin4(),            
+            new AS400Bin4(),            
+            new AS400Bin4(),            
+            new AS400Bin4(),            
+            new AS400Text(20),
+            new AS400Text(50),
+            new AS400Text(50),
+            new AS400Text(1024)
+        };
+        return retrieveUserSpace("SMBSHARES", curLib, qzlslstiDataType);
+    }
+    
+    public String getNFSShares() 
+            throws PropertyVetoException, AS400SecurityException, 
+            ErrorCompletingRequestException, IOException, InterruptedException, 
+            ObjectDoesNotExistException, SQLException{
+        
+        if (insecureConnection==null && secureConnection==null)
+            return null;
+
+        /*
+        
+        Retrieve Network File System Export Entries (QZNFRTVE) API
+
+          Required Parameter Group:
+
+        1 	Receiver variable                       Output 	Char(*)
+        2 	Length of receiver variable in bytes 	Input 	Binary(4)
+        3 	Returned records feedback information 	Output 	Char(16)
+        4 	Format name                             Input 	Char(8)
+        5 	Object path name                        Input 	Char(*)
+        6 	Length of object path name in bytes 	Input 	Binary(4)
+        7 	CCSID of object path name given 	Input 	Binary(4)
+        8 	Desired CCSID of the object path
+                names returned                          Input 	Binary(4)
+        9 	Handle                                  Input 	Binary(4)
+        10 	Error code                              I/O 	Char(*) 
+        
+        */
+        
+
+        AS400Text char8Converter = new AS400Text(8);
+        AS400Text char6Converter = new AS400Text(6);    
+        AS400Bin4 bin4 = new AS400Bin4(); 
+
+        /*
+        Currently, while the EXPE0100 format is quite extensive, only the basic NFS share information
+        will be read (read only flag, SUID flag, anonymous user profile name, NFS version, NFS4 root export flag, NFS4 public export flag, object path name).
+        */
+        
+        String[] nfsTableColumns = {"IsReadOnly", "IsNoSUID", "AnonymousUserName", "NFSVersion", "IsNFS4Root", "IsNFS4Public", "ObjectPathName"};
+        String outputTableName = dbTempConnection.createTempTable("nfsshares", nfsTableColumns);
+
+        /*
+            EXPE0100 Format
+        
+            Offset 	Type            Field
+            Dec 	Hex
+            0 	0 	BINARY(4) 	Length of entry
+            4 	4 	BINARY(4) 	Displacement to object path name
+            8 	8 	BINARY(4) 	Length of object path name
+            12 	C 	BINARY(4) 	CCSID of object path name
+            16 	10 	BINARY(4) 	Read-only flag
+            20 	14 	BINARY(4) 	NOSUID flag
+            24 	18 	BINARY(4) 	Displacement to read-write host names
+            28 	1C 	BINARY(4) 	Number of read-write host names
+            32 	20 	BINARY(4) 	Displacement to root host names
+            36 	24 	BINARY(4) 	Number of root host names
+            40 	28 	BINARY(4) 	Displacement to access host names
+            44 	2C 	BINARY(4) 	Number of access host names
+            48 	30 	BINARY(4) 	Displacement to host options
+            52 	34 	BINARY(4) 	Number of host options
+            56 	38 	BINARY(4) 	Anonymous user ID
+            60 	3C 	CHAR(10) 	Anonymous User Profile
+        From V6R1:
+            70 	46 	BINARY(4) 	NFS version flag
+            74 	4A 	BINARY(4) 	Displacement to NFS security flavors
+            78 	4E 	BINARY(4) 	Number of security flavors
+            82 	52 	BINARY(4) 	NFS Root export flag
+            86 	56 	BINARY(4) 	Public export flag
+            90 	5A 	BINARY(4) 	Displacement to export name
+            94 	5E 	BINARY(4) 	Length of export name
+            98 	62 	BINARY(4) 	CCSID of export name
+        End From V6R1
+            * 	* 	CHAR(*) 	Object path name
+        From V6R1:
+            * 	* 	CHAR(*) 	Export name
+            These fields repeat for each NFS security flavor. 	
+                        BINARY(4) 	Security flavor
+        End From V6R1
+            These fields repeat for each host name in the read-write access list:
+                        BINARY(4) 	Length of host name entry
+                        BINARY(4) 	Length of host name
+                        CHAR(*) 	Host name
+            These fields repeat for each host name in the root access list. 	
+                        BINARY(4) 	Length of host name entry
+                        BINARY(4) 	Length of host name
+                        CHAR(*) 	Host name
+            These fields repeat for each host name in the access list. 	
+                        BINARY(4) 	Length of host name entry
+                        BINARY(4) 	Length of host name
+                        CHAR(*) 	Host name
+            These fields repeat for each host name in the host options list. 	
+                        BINARY(4) 	Length of host name options entry
+                        BINARY(4) 	Network data file CCSID
+                        BINARY(4) 	Network path name CCSID
+                        BINARY(4) 	Write mode flag
+                        BINARY(4) 	Length of host name
+                        CHAR(*) 	Host name
+        */
+        
+        AS400DataType[] qznfrtveCommonDataType = new AS400DataType[]{
+            new AS400Bin4(),    //Length of entry            
+            new AS400Bin4(),    //Displacement to object path name        
+            new AS400Bin4(),    //Length of object path name        
+            new AS400Bin4(),    //CCSID of object path name        
+            new AS400Bin4(),    //Read-only flag        
+            new AS400Bin4(),    //NOSUID flag        
+            new AS400Bin4(),    //Displacement to read-write host names        
+            new AS400Bin4(),    //Number of read-write host names        
+            new AS400Bin4(),    //Displacement to root host names        
+            new AS400Bin4(),    //Number of root host names        
+            new AS400Bin4(),    //Displacement to access host names        
+            new AS400Bin4(),    //Number of access host names        
+            new AS400Bin4(),    //Displacement to host options        
+            new AS400Bin4(),    //Number of host options        
+            new AS400Bin4(),    //Anonymous user ID        
+            new AS400Text(10)   //Anonymous User Profile
+        };
+
+        AS400DataType[] qznfrtveV6R1DataType = new AS400DataType[]{
+            new AS400Bin4(),    //NFS version flag        
+            new AS400Bin4(),    //Displacement to NFS security flavors        
+            new AS400Bin4(),    //Number of security flavors        
+            new AS400Bin4(),    //NFS Root export flag        
+            new AS400Bin4(),    //Public export flag        
+            new AS400Bin4(),    //Displacement to export name        
+            new AS400Bin4(),    //Length of export name        
+            new AS400Bin4()     //CCSID of export name       
+        };
+
+        
+        AS400DataType[] qznfrtveFeedBackDataType = new AS400DataType[]{
+            new AS400Bin4(),            
+            new AS400Bin4(),            
+            new AS400Bin4(),            
+            new AS400Bin4()            
+        };
+        
+        int handle = 0;
+        byte[] buffer;
+        Object[] convertedBuffer;
+        AS400Structure bufferConverter;
+        
+        do {
+            ProgramParameter[] qznfrtveParms = new ProgramParameter[10];        
+            qznfrtveParms[0] = new ProgramParameter(65536);
+            qznfrtveParms[0].setParameterType(ProgramParameter.PASS_BY_REFERENCE);
+            qznfrtveParms[1] = new ProgramParameter(bin4.toBytes(65536));
+            qznfrtveParms[1].setParameterType(ProgramParameter.PASS_BY_REFERENCE);
+            qznfrtveParms[2] = new ProgramParameter(16); 
+            qznfrtveParms[2].setParameterType(ProgramParameter.PASS_BY_REFERENCE);        
+            qznfrtveParms[3] = new ProgramParameter(char8Converter.toBytes("EXPE0100"));
+            qznfrtveParms[3].setParameterType(ProgramParameter.PASS_BY_REFERENCE);
+            qznfrtveParms[4] = new ProgramParameter(char6Converter.toBytes("*FIRST"));
+            qznfrtveParms[4].setParameterType(ProgramParameter.PASS_BY_REFERENCE);
+            qznfrtveParms[5] = new ProgramParameter(bin4.toBytes(6));
+            qznfrtveParms[5].setParameterType(ProgramParameter.PASS_BY_REFERENCE);
+            qznfrtveParms[6] = new ProgramParameter(bin4.toBytes(0));
+            qznfrtveParms[6].setParameterType(ProgramParameter.PASS_BY_REFERENCE);
+            qznfrtveParms[7] = new ProgramParameter(bin4.toBytes(0));
+            qznfrtveParms[7].setParameterType(ProgramParameter.PASS_BY_REFERENCE);
+            qznfrtveParms[8] = new ProgramParameter(bin4.toBytes(handle));
+            qznfrtveParms[8].setParameterType(ProgramParameter.PASS_BY_REFERENCE);
+            byte[] errorBytes = new byte[32];
+            qznfrtveParms[9] = new ProgramParameter(errorBytes, 32);
+            qznfrtveParms[9].setParameterType(ProgramParameter.PASS_BY_REFERENCE);
+
+            ProgramCall qznfrtve = new ProgramCall(secure ? secureConnection : insecureConnection,
+                                            "/qsys.lib/qznfrtve.pgm", qznfrtveParms);   
+
+            if (!qznfrtve.run()) {                            
+                Logger.getLogger(IBMiConnector.class.getName()).log(Level.INFO, IBMiUtilities.stringFromAS400Message(qznfrtve.getMessageList()));
+                return null;
+            }
+            
+            AS400Structure returnedFeedBackDataConverter = new AS400Structure(qznfrtveFeedBackDataType);
+            Object[] returnedFeedBackArray = (Object[]) returnedFeedBackDataConverter.toObject(qznfrtveParms[2].getOutputData(), 0);
+            if (returnedFeedBackArray.length != qznfrtveFeedBackDataType.length) {
+                Logger.getLogger(IBMiConnector.class.getName()).log(Level.SEVERE, "Received data format does not match.");
+                return null;
+            }
+            
+            handle = (int)returnedFeedBackArray[3];
+            
+            // If not NFS shares found in this list, do not process output (it's empty)
+            int numEntries = (int)returnedFeedBackArray[2];
+            if (numEntries == 0)
+                break; 
+            
+            
+            byte[] outputData = qznfrtveParms[0].getOutputData();
+            
+            int entryLength; 
+            int entryOffset = 0;
+            
+            ByteArrayInputStream dataStream;
+            
+            for (int i=0; i<numEntries; i++){
+                entryLength = ByteBuffer.wrap(outputData, entryOffset, 4).getInt();
+                dataStream = new ByteArrayInputStream(outputData, entryOffset, entryLength);
+                
+                buffer = new byte[IBMiUtilities.sumDataTypeFields(qznfrtveCommonDataType)]; 
+                dataStream.read(buffer);
+
+                bufferConverter = new AS400Structure(qznfrtveCommonDataType);
+                convertedBuffer = (Object[]) bufferConverter.toObject(buffer, 0);
+                
+                int objectNameOffset = (int)convertedBuffer[1];
+                int objectNameLength = (int)convertedBuffer[2];
+                
+                Vector arrayData = new Vector();
+                //read only flag
+                arrayData.addElement(String.valueOf((int)convertedBuffer[4]));
+                //SUID flag
+                arrayData.addElement(String.valueOf((int)convertedBuffer[5]));
+                //anonymous user profile name
+                arrayData.addElement(convertedBuffer[15].toString());
+                
+                if ((secure ? secureConnection : insecureConnection).getVRM() < 0x00060100){
+                    arrayData.addElement("N/A");
+                    arrayData.addElement("N/A");
+                    arrayData.addElement("N/A");
+                } else {
+                    buffer = new byte[IBMiUtilities.sumDataTypeFields(qznfrtveV6R1DataType)]; 
+                    dataStream.read(buffer);
+                    bufferConverter = new AS400Structure(qznfrtveV6R1DataType);
+                    convertedBuffer = (Object[]) bufferConverter.toObject(buffer, 0);
+                    
+                    //NFS Version
+                    arrayData.addElement(String.valueOf((int)convertedBuffer[0]));
+                    //NFS4 root export flag
+                    arrayData.addElement(String.valueOf((int)convertedBuffer[3]));
+                    //NFS4 public export flag
+                    arrayData.addElement(String.valueOf((int)convertedBuffer[4]));
+                }
+                dataStream.reset();
+                dataStream.skip(objectNameOffset);
+                byte[] objectName = new byte[objectNameLength];
+                dataStream.read(objectName);
+                //object path name        
+                arrayData.addElement((String)(new AS400Text(objectNameLength)).toObject(objectName));
+
+                /*
+                For future development, the indication following may be implemented:
+                - security flavors
+                - read-write access list
+                - root access list
+                - access list
+                - host options list
+                */
+                dbTempConnection.insertrow(outputTableName, arrayData);
+                
+                entryOffset += entryLength;
+            }
+        } while (handle != 0);
+        
+        return outputTableName;        
+    }
+    
+    public String getNetRoutes() 
+            throws PropertyVetoException, AS400SecurityException, 
+            ErrorCompletingRequestException, IOException, InterruptedException, 
+            ObjectDoesNotExistException, SQLException{
+
+        /*
+    
+            List Network Routes (QtocLstNetRte) API
+            Required Parameter Group:
+
+              1 	Qualified user space name 	Input 	Char(20)
+              2 	Format name                     Input 	Char(8)
+              3 	Error Code                      I/O 	Char(*)
+        
+        */
+
+        
+        createUserSpace("NETROUTE", curLib, "NETROUTE", 1, "User space for network routes");
+        if (!makeUserSpaceAutoExtendible("NETROUTE", curLib, true))
+            return null;
+
+        String userSpaceName = IBMiUtilities.padTrimString("NETROUTE  " + curLib.toUpperCase(), 20);
+
+        ProgramParameter[] qtocnetstsParms = new ProgramParameter[3];
+
+        AS400Text char8Converter = new AS400Text(8);
+        AS400Text char20Converter = new AS400Text(20);    
+        AS400Bin4 bin4 = new AS400Bin4();                                                                        
+        
+        qtocnetstsParms[0] = new ProgramParameter(char20Converter.toBytes(userSpaceName));
+        qtocnetstsParms[0].setParameterType(ProgramParameter.PASS_BY_REFERENCE);
+        qtocnetstsParms[1] = new ProgramParameter(char8Converter.toBytes("NRTE0100"));
+        qtocnetstsParms[1].setParameterType(ProgramParameter.PASS_BY_REFERENCE);
+        byte[] errorBytes = new byte[32];
+        qtocnetstsParms[2] = new ProgramParameter(errorBytes, 32);
+        qtocnetstsParms[2].setParameterType(ProgramParameter.PASS_BY_REFERENCE);
+
+        ServiceProgramCall qtocnetsts = new ServiceProgramCall(secure ? secureConnection : insecureConnection,
+                                        "/qsys.lib/qtocnetsts.srvpgm", "QtocLstNetRte",
+                                        ServiceProgramCall.NO_RETURN_VALUE, qtocnetstsParms);                                
+        if (!qtocnetsts.run()) {                            
+            Logger.getLogger(IBMiConnector.class.getName()).log(Level.INFO, IBMiUtilities.stringFromAS400Message(qtocnetsts.getMessageList()));
+            return null;
+        }
+        
+        /*
+            NRTE0100 Format
+
+                Offset 	Type 	Field
+                Dec 	Hex
+                0 	0 	CHAR(15) 	Route destination
+                15 	F 	CHAR(1) 	Reserved
+                16 	10 	BINARY(4) 	Route destination binary
+                20 	14 	CHAR(15) 	Subnet mask
+                35 	23 	CHAR(1) 	Reserved
+                36 	24 	BINARY(4) 	Subnet mask binary
+                40 	28 	CHAR(15) 	Next hop
+                55 	37 	CHAR(1) 	Reserved
+                56 	38 	BINARY(4) 	Next hop binary
+                60 	3C 	BINARY(4) 	Route status
+                64 	40 	BINARY(4) 	Type of service
+                68 	44 	BINARY(4) 	Route MTU
+                72 	48 	BINARY(4) 	Route type
+                76 	4C 	BINARY(4) 	Route source
+                80 	50 	BINARY(4) 	Route precedence
+                84 	54 	BINARY(4) 	Local binding interface status
+                88 	58 	BINARY(4) 	Local binding type
+                92 	5C 	BINARY(4) 	Local binding line type
+                96 	60 	CHAR(15) 	Local binding interface
+                111 	6F 	CHAR(1) 	Reserved
+                112 	70 	BINARY(4) 	Local binding interface binary
+                116 	74 	CHAR(15) 	Local binding subnet mask
+                131 	83 	CHAR(1) 	Reserved
+                132 	84 	BINARY(4) 	Local binding subnet mask binary
+                136 	88 	CHAR(15) 	Local binding network address
+                151 	97 	CHAR(1) 	Reserved
+                152 	98 	BINARY(4) 	Local binding network address binary
+                156 	9C 	CHAR(10) 	Local binding line description
+                166 	A6 	CHAR(8) 	Change date
+                174 	AE 	CHAR(6) 	Change time
+FROM V6R1:      180 	B4 	CHAR(50) 	Text description
+                230 	E6 	CHAR(2) 	Reserved
+FROM V7R2:      232 	E8 	BINARY(4) 	Local binding virtual LAN identifier
+        */
+        
+        AS400DataType[] routesDataTypeV5R4 = new AS400DataType[]{
+            new AS400Text(15),
+            new AS400Text(1),
+            new AS400Bin4(),
+            new AS400Text(15),
+            new AS400Text(1),
+            new AS400Bin4(),
+            new AS400Text(15),
+            new AS400Text(1),
+            new AS400Bin4(),
+            new AS400Bin4(),
+            new AS400Bin4(),
+            new AS400Bin4(),
+            new AS400Bin4(),
+            new AS400Bin4(),
+            new AS400Bin4(),
+            new AS400Bin4(),
+            new AS400Bin4(),
+            new AS400Bin4(),
+            new AS400Text(15),
+            new AS400Text(1),
+            new AS400Bin4(),
+            new AS400Text(15),
+            new AS400Text(1),
+            new AS400Bin4(),
+            new AS400Text(15),
+            new AS400Text(1),
+            new AS400Bin4(),
+            new AS400Text(10),
+            new AS400Text(8),
+            new AS400Text(6)
+        };
+        
+        AS400DataType[] routesDataTypeV6R1 = new AS400DataType[]{
+            new AS400Text(15),
+            new AS400Text(1),
+            new AS400Bin4(),
+            new AS400Text(15),
+            new AS400Text(1),
+            new AS400Bin4(),
+            new AS400Text(15),
+            new AS400Text(1),
+            new AS400Bin4(),
+            new AS400Bin4(),
+            new AS400Bin4(),
+            new AS400Bin4(),
+            new AS400Bin4(),
+            new AS400Bin4(),
+            new AS400Bin4(),
+            new AS400Bin4(),
+            new AS400Bin4(),
+            new AS400Bin4(),
+            new AS400Text(15),
+            new AS400Text(1),
+            new AS400Bin4(),
+            new AS400Text(15),
+            new AS400Text(1),
+            new AS400Bin4(),
+            new AS400Text(15),
+            new AS400Text(1),
+            new AS400Bin4(),
+            new AS400Text(10),
+            new AS400Text(8),
+            new AS400Text(6),
+            new AS400Text(50),
+            new AS400Text(2)
+        };
+        
+        AS400DataType[] routesDataTypeV7R2 = new AS400DataType[]{
+            new AS400Text(15),
+            new AS400Text(1),
+            new AS400Bin4(),
+            new AS400Text(15),
+            new AS400Text(1),
+            new AS400Bin4(),
+            new AS400Text(15),
+            new AS400Text(1),
+            new AS400Bin4(),
+            new AS400Bin4(),
+            new AS400Bin4(),
+            new AS400Bin4(),
+            new AS400Bin4(),
+            new AS400Bin4(),
+            new AS400Bin4(),
+            new AS400Bin4(),
+            new AS400Bin4(),
+            new AS400Bin4(),
+            new AS400Text(15),
+            new AS400Text(1),
+            new AS400Bin4(),
+            new AS400Text(15),
+            new AS400Text(1),
+            new AS400Bin4(),
+            new AS400Text(15),
+            new AS400Text(1),
+            new AS400Bin4(),
+            new AS400Text(10),
+            new AS400Text(8),
+            new AS400Text(6),
+            new AS400Text(50),
+            new AS400Text(2),
+            new AS400Bin4()
+        };
+        
+        if ((secure ? secureConnection : insecureConnection).getVRM() < 0x00060100)
+           return retrieveUserSpace("NETROUTE", curLib, routesDataTypeV5R4);
+        else if ((secure ? secureConnection : insecureConnection).getVRM() < 0x00070200)
+           return retrieveUserSpace("NETROUTE", curLib, routesDataTypeV6R1);
+        else if ((secure ? secureConnection : insecureConnection).getVRM() >= 0x00070200)
+           return retrieveUserSpace("NETROUTE", curLib, routesDataTypeV7R2);
+        else return null;
+    }    
+    
+    public String getNetIfaces() 
+            throws PropertyVetoException, AS400SecurityException, 
+            ErrorCompletingRequestException, IOException, InterruptedException, 
+            ObjectDoesNotExistException, SQLException{
+
+        /*
+    
+            List Network Interfaces (QtocLstNetIfc) API
+            Required Parameter Group:
+
+            1 	Qualified user space name 	Input 	Char(20)
+            2 	Format name 	Input 	Char(8)
+            3 	Error Code 	I/O 	Char(*)
+        
+        */
+        
+        createUserSpace("NETIFAC", curLib, "NETIFAC", 1, "User space for network interfaces");
+        
+        if (!makeUserSpaceAutoExtendible("NETIFAC", curLib, true))
+            return null;
+
+        String userSpaceName = IBMiUtilities.padTrimString("NETIFAC   " + curLib.toUpperCase(), 20);
+
+        ProgramParameter[] qtocnetstsParms = new ProgramParameter[3];
+
+        AS400Text char8Converter = new AS400Text(8);
+        AS400Text char20Converter = new AS400Text(20);    
+        AS400Bin4 bin4 = new AS400Bin4();                                                                        
+        
+        qtocnetstsParms[0] = new ProgramParameter(char20Converter.toBytes(userSpaceName));
+        qtocnetstsParms[0].setParameterType(ProgramParameter.PASS_BY_REFERENCE);
+        qtocnetstsParms[1] = new ProgramParameter(char8Converter.toBytes("NIFC0100"));
+        qtocnetstsParms[1].setParameterType(ProgramParameter.PASS_BY_REFERENCE);
+        byte[] errorBytes = new byte[32];
+        qtocnetstsParms[2] = new ProgramParameter(errorBytes, 32);
+        qtocnetstsParms[2].setParameterType(ProgramParameter.PASS_BY_REFERENCE);
+
+        ServiceProgramCall qtocnetsts = new ServiceProgramCall(secure ? secureConnection : insecureConnection,
+                                        "/qsys.lib/qtocnetsts.srvpgm", "QtocLstNetIfc",
+                                        ServiceProgramCall.NO_RETURN_VALUE, qtocnetstsParms);                                
+        if (!qtocnetsts.run()) {                            
+            Logger.getLogger(IBMiConnector.class.getName()).log(Level.INFO, IBMiUtilities.stringFromAS400Message(qtocnetsts.getMessageList()));
+            return null;
+        }
+        
+        /*
+            NIFC0100 Format
+
+            Offset 	Type 	Field
+            Dec 	Hex
+            0           0 	CHAR(15) 	Internet address
+            15          F 	CHAR(1) 	Reserved
+            16          10 	BINARY(4) 	Internet address binary
+            20          14 	CHAR(15) 	Network address
+            35          23 	CHAR(1) 	Reserved
+            36          24 	BINARY(4) 	Network address binary
+            40          28 	CHAR(10) 	Network name
+            50          32 	CHAR(10) 	Line description
+            60          3C 	CHAR(10) 	Interface name
+            70          46 	CHAR(2) 	Reserved
+            72          48 	BINARY(4) 	Interface status
+            76          4C 	BINARY(4) 	Interface type of service
+            80          50 	BINARY(4) 	Interface MTU
+            84          54 	BINARY(4) 	Interface line type
+            88          58 	CHAR(15) 	Host address
+            103 	67 	CHAR(1) 	Reserved
+            104 	68 	BINARY(4) 	Host address binary
+            108 	6C 	CHAR(15) 	Interface subnet mask
+            123 	7B 	CHAR(1) 	Reserved
+            124 	7C 	BINARY(4) 	Interface subnet mask binary
+            128 	80 	CHAR(15) 	Directed broadcast address
+            143 	8F 	CHAR(1) 	Reserved
+            144 	90 	BINARY(4) 	Directed broadcast address binary
+            148 	94 	CHAR(8) 	Change date
+            156 	9C 	CHAR(6) 	Change time
+            162 	A2 	CHAR(15) 	Associated local interface
+            177 	B1 	CHAR(3) 	Reserved
+            180 	B4 	BINARY(4) 	Associated local interface binary
+            184 	B8 	BINARY(4) 	Change status
+            188 	BC 	BINARY(4) 	Packet rules
+            192 	C0 	BINARY(4) 	Automatic start
+            196 	C4 	BINARY(4) 	TRLAN bit sequencing
+            200 	C8 	BINARY(4) 	Interface type
+            204 	CC 	BINARY(4) 	Proxy ARP enabled
+            208 	D0 	BINARY(4) 	Proxy ARP allowed
+            212 	D4 	BINARY(4) 	Configured MTU
+            216 	D8 	CHAR(24) 	Network name - full
+            240 	F0 	CHAR(24) 	Interface name - full
+        From V5R4:
+            264 	108 	CHAR(50) 	Alias name
+            314 	13A 	CHAR(2) 	Reserved
+            316 	13C 	BINARY(4) 	Alias name CCSID
+            320 	140 	BINARY(4) 	Offset to preferred interface list
+            324 	144 	BINARY(4) 	Number of entries in preferred interface list
+            328 	148 	BINARY(4) 	Length of one preferred interface list entry
+            332 	14C 	CHAR(50) 	Interface description
+            382 	17E 	CHAR(2) 	Reserved
+            384 	180 	BINARY(4) 	DHCP created
+            388 	184 	BINARY(4) 	DHCP dynamic DNS updates
+            392 	188 	BINARY(8) 	DHCP lease expiration
+            400 	190 	CHAR(8) 	DHCP lease expiration - date
+            408 	198 	CHAR(6) 	DHCP lease expiration - time 
+            x            	CHAR(*) 	Prefered interface list entry (See Format of Prefered Interface List Entry for more information )
+        From V7R1:
+            414 	19E 	BINARY(8) 	DHCP lease obtained
+            422 	1A6 	CHAR(8) 	DHCP lease obtained - date
+            430 	1AE 	CHAR(6) 	DHCP lease obtained - time
+            436 	1B4 	CHAR(1) 	Reserved
+            x            	CHAR(*) 	Prefered interface list entry (See Format of Prefered Interface List Entry for more information )
+        End-From V7R1
+        
+        From V7R2:
+            436 	1B4 	BINARY(4) 	Use DHCP unique identifier
+            440 	1B8 	CHAR(15) 	DHCP server IP address
+            455 	1C7 	CHAR(1) 	Reserved
+            456 	1C8 	BINARY(4) 	Virtual LAN identifier
+            460 	1CC 	BINARY(4) 	Preferred interface default route 
+            x            	CHAR(*) 	Prefered interface list entry (See Format of Prefered Interface List Entry for more information )
+        End-From V7R2
+        
+            x            	CHAR(*) 	Prefered interface list entry (See Format of Prefered Interface List Entry for more information )
+            x - This field repeats 10 times for each prefered interface list entry
+        
+            Format of Preferred Interface List Entry
+
+            Offset 	Type 	Field
+            Dec 	Hex
+            0 	0 	CHAR(15) 	Preferred interface Internet address
+            15 	F 	CHAR(1) 	Reserved
+            16 	10 	BINARY(4) 	Preferred interface Internet address binary
+            20 	14 	CHAR(*) 	Reserved
+
+        */
+        AS400DataType[] netifacDataTypeV5R3 = new AS400DataType[]{
+            new AS400Text(15),
+            new AS400Text(1),
+            new AS400Bin4(),            
+            new AS400Text(15),
+            new AS400Text(1),
+            new AS400Bin4(),            
+            new AS400Text(10),
+            new AS400Text(10),
+            new AS400Text(10),
+            new AS400Text(2),
+            new AS400Bin4(),            
+            new AS400Bin4(),            
+            new AS400Bin4(),            
+            new AS400Bin4(),            
+            new AS400Text(15),
+            new AS400Text(1),
+            new AS400Bin4(),            
+            new AS400Text(15),
+            new AS400Text(1),
+            new AS400Bin4(),            
+            new AS400Text(15),
+            new AS400Text(1),
+            new AS400Bin4(),            
+            new AS400Text(8),
+            new AS400Text(6),
+            new AS400Text(15),
+            new AS400Text(3),
+            new AS400Bin4(),            
+            new AS400Bin4(),            
+            new AS400Bin4(),            
+            new AS400Bin4(),            
+            new AS400Bin4(),            
+            new AS400Bin4(),            
+            new AS400Bin4(),            
+            new AS400Bin4(),            
+            new AS400Bin4(),            
+            new AS400Text(24),
+            new AS400Text(24)
+        };
+
+        AS400DataType[] netifacDataTypeV5R4 = new AS400DataType[]{
+            new AS400Text(15),
+            new AS400Text(1),
+            new AS400Bin4(),            
+            new AS400Text(15),
+            new AS400Text(1),
+            new AS400Bin4(),            
+            new AS400Text(10),
+            new AS400Text(10),
+            new AS400Text(10),
+            new AS400Text(2),
+            new AS400Bin4(),            
+            new AS400Bin4(),            
+            new AS400Bin4(),            
+            new AS400Bin4(),            
+            new AS400Text(15),
+            new AS400Text(1),
+            new AS400Bin4(),            
+            new AS400Text(15),
+            new AS400Text(1),
+            new AS400Bin4(),            
+            new AS400Text(15),
+            new AS400Text(1),
+            new AS400Bin4(),            
+            new AS400Text(8),
+            new AS400Text(6),
+            new AS400Text(15),
+            new AS400Text(3),
+            new AS400Bin4(),            
+            new AS400Bin4(),            
+            new AS400Bin4(),            
+            new AS400Bin4(),            
+            new AS400Bin4(),            
+            new AS400Bin4(),            
+            new AS400Bin4(),            
+            new AS400Bin4(),            
+            new AS400Bin4(),            
+            new AS400Text(24),
+            new AS400Text(24),
+            new AS400Text(50),
+            new AS400Text(2),
+            new AS400Bin4(),            
+            new AS400Bin4(),            
+            new AS400Bin4(),            
+            new AS400Bin4(),            
+            new AS400Text(50),
+            new AS400Text(2),
+            new AS400Bin4(),            
+            new AS400Bin4(),            
+            new AS400Bin4(),            
+            new AS400Bin4(),            
+            //Subtable : 10 entries:
+            new AS400Text(15),
+            new AS400Text(1),
+            new AS400Bin4(),            
+            new AS400Text(15),
+            new AS400Text(1),
+            new AS400Bin4(),            
+            new AS400Text(15),
+            new AS400Text(1),
+            new AS400Bin4(),            
+            new AS400Text(15),
+            new AS400Text(1),
+            new AS400Bin4(),            
+            new AS400Text(15),
+            new AS400Text(1),
+            new AS400Bin4(),            
+            new AS400Text(15),
+            new AS400Text(1),
+            new AS400Bin4(),            
+            new AS400Text(15),
+            new AS400Text(1),
+            new AS400Bin4(),            
+            new AS400Text(15),
+            new AS400Text(1),
+            new AS400Bin4(),            
+            new AS400Text(15),
+            new AS400Text(1),
+            new AS400Bin4(),            
+            new AS400Text(15),
+            new AS400Text(1),
+            new AS400Bin4()                        
+        };
+
+        
+        AS400DataType[] netifacDataTypeV6R1 = new AS400DataType[]{
+            new AS400Text(15),
+            new AS400Text(1),
+            new AS400Bin4(),            
+            new AS400Text(15),
+            new AS400Text(1),
+            new AS400Bin4(),            
+            new AS400Text(10),
+            new AS400Text(10),
+            new AS400Text(10),
+            new AS400Text(2),
+            new AS400Bin4(),            
+            new AS400Bin4(),            
+            new AS400Bin4(),            
+            new AS400Bin4(),            
+            new AS400Text(15),
+            new AS400Text(1),
+            new AS400Bin4(),            
+            new AS400Text(15),
+            new AS400Text(1),
+            new AS400Bin4(),            
+            new AS400Text(15),
+            new AS400Text(1),
+            new AS400Bin4(),            
+            new AS400Text(8),
+            new AS400Text(6),
+            new AS400Text(15),
+            new AS400Text(3),
+            new AS400Bin4(),            
+            new AS400Bin4(),            
+            new AS400Bin4(),            
+            new AS400Bin4(),            
+            new AS400Bin4(),            
+            new AS400Bin4(),            
+            new AS400Bin4(),            
+            new AS400Bin4(),            
+            new AS400Bin4(),            
+            new AS400Text(24),
+            new AS400Text(24),
+            new AS400Text(50),
+            new AS400Text(2),
+            new AS400Bin4(),            
+            new AS400Bin4(),            
+            new AS400Bin4(),            
+            new AS400Bin4(),            
+            new AS400Text(50),
+            new AS400Text(2),
+            new AS400Bin4(),            
+            new AS400Bin4(),            
+            new AS400Bin8(),            
+            new AS400Text(8),
+            new AS400Text(6),
+            //Subtable : 10 entries:
+            new AS400Text(15),
+            new AS400Text(1),
+            new AS400Bin4(),            
+            new AS400Text(15),
+            new AS400Text(1),
+            new AS400Bin4(),            
+            new AS400Text(15),
+            new AS400Text(1),
+            new AS400Bin4(),            
+            new AS400Text(15),
+            new AS400Text(1),
+            new AS400Bin4(),            
+            new AS400Text(15),
+            new AS400Text(1),
+            new AS400Bin4(),            
+            new AS400Text(15),
+            new AS400Text(1),
+            new AS400Bin4(),            
+            new AS400Text(15),
+            new AS400Text(1),
+            new AS400Bin4(),            
+            new AS400Text(15),
+            new AS400Text(1),
+            new AS400Bin4(),            
+            new AS400Text(15),
+            new AS400Text(1),
+            new AS400Bin4(),            
+            new AS400Text(15),
+            new AS400Text(1),
+            new AS400Bin4()                        
+        };
+
+        AS400DataType[] netifacDataTypeV7R1 = new AS400DataType[]{
+            new AS400Text(15),
+            new AS400Text(1),
+            new AS400Bin4(),            
+            new AS400Text(15),
+            new AS400Text(1),
+            new AS400Bin4(),            
+            new AS400Text(10),
+            new AS400Text(10),
+            new AS400Text(10),
+            new AS400Text(2),
+            new AS400Bin4(),            
+            new AS400Bin4(),            
+            new AS400Bin4(),            
+            new AS400Bin4(),            
+            new AS400Text(15),
+            new AS400Text(1),
+            new AS400Bin4(),            
+            new AS400Text(15),
+            new AS400Text(1),
+            new AS400Bin4(),            
+            new AS400Text(15),
+            new AS400Text(1),
+            new AS400Bin4(),            
+            new AS400Text(8),
+            new AS400Text(6),
+            new AS400Text(15),
+            new AS400Text(3),
+            new AS400Bin4(),            
+            new AS400Bin4(),            
+            new AS400Bin4(),            
+            new AS400Bin4(),            
+            new AS400Bin4(),            
+            new AS400Bin4(),            
+            new AS400Bin4(),            
+            new AS400Bin4(),            
+            new AS400Bin4(),            
+            new AS400Text(24),
+            new AS400Text(24),
+            new AS400Text(50),
+            new AS400Text(2),
+            new AS400Bin4(),            
+            new AS400Bin4(),            
+            new AS400Bin4(),            
+            new AS400Bin4(),            
+            new AS400Text(50),
+            new AS400Text(2),
+            new AS400Bin4(),            
+            new AS400Bin4(),            
+            new AS400Bin8(),            
+            new AS400Text(8),
+            new AS400Text(6),
+            new AS400Bin8(),            
+            new AS400Text(8),
+            new AS400Text(6),
+            new AS400Text(1),            
+            //Subtable : 10 entries:
+            new AS400Text(15),
+            new AS400Text(1),
+            new AS400Bin4(),            
+            new AS400Text(15),
+            new AS400Text(1),
+            new AS400Bin4(),            
+            new AS400Text(15),
+            new AS400Text(1),
+            new AS400Bin4(),            
+            new AS400Text(15),
+            new AS400Text(1),
+            new AS400Bin4(),            
+            new AS400Text(15),
+            new AS400Text(1),
+            new AS400Bin4(),            
+            new AS400Text(15),
+            new AS400Text(1),
+            new AS400Bin4(),            
+            new AS400Text(15),
+            new AS400Text(1),
+            new AS400Bin4(),            
+            new AS400Text(15),
+            new AS400Text(1),
+            new AS400Bin4(),            
+            new AS400Text(15),
+            new AS400Text(1),
+            new AS400Bin4(),            
+            new AS400Text(15),
+            new AS400Text(1),
+            new AS400Bin4()                        
+        };
+
+        AS400DataType[] netifacDataTypeV7R2 = new AS400DataType[]{
+            new AS400Text(15),
+            new AS400Text(1),
+            new AS400Bin4(),            
+            new AS400Text(15),
+            new AS400Text(1),
+            new AS400Bin4(),            
+            new AS400Text(10),
+            new AS400Text(10),
+            new AS400Text(10),
+            new AS400Text(2),
+            new AS400Bin4(),            
+            new AS400Bin4(),            
+            new AS400Bin4(),            
+            new AS400Bin4(),            
+            new AS400Text(15),
+            new AS400Text(1),
+            new AS400Bin4(),            
+            new AS400Text(15),
+            new AS400Text(1),
+            new AS400Bin4(),            
+            new AS400Text(15),
+            new AS400Text(1),
+            new AS400Bin4(),            
+            new AS400Text(8),
+            new AS400Text(6),
+            new AS400Text(15),
+            new AS400Text(3),
+            new AS400Bin4(),            
+            new AS400Bin4(),            
+            new AS400Bin4(),            
+            new AS400Bin4(),            
+            new AS400Bin4(),            
+            new AS400Bin4(),            
+            new AS400Bin4(),            
+            new AS400Bin4(),            
+            new AS400Bin4(),            
+            new AS400Text(24),
+            new AS400Text(24),
+            new AS400Text(50),
+            new AS400Text(2),
+            new AS400Bin4(),            
+            new AS400Bin4(),            
+            new AS400Bin4(),            
+            new AS400Bin4(),            
+            new AS400Text(50),
+            new AS400Text(2),
+            new AS400Bin4(),            
+            new AS400Bin4(),            
+            new AS400Bin8(),            
+            new AS400Text(8),
+            new AS400Text(6),
+            new AS400Bin8(),            
+            new AS400Text(8),
+            new AS400Text(6),
+            new AS400Bin4(),            
+            new AS400Text(15),
+            new AS400Text(1),
+            new AS400Bin4(),            
+            new AS400Bin4(),            
+            //Subtable : 10 entries:
+            new AS400Text(15),
+            new AS400Text(1),
+            new AS400Bin4(),            
+            new AS400Text(15),
+            new AS400Text(1),
+            new AS400Bin4(),            
+            new AS400Text(15),
+            new AS400Text(1),
+            new AS400Bin4(),            
+            new AS400Text(15),
+            new AS400Text(1),
+            new AS400Bin4(),            
+            new AS400Text(15),
+            new AS400Text(1),
+            new AS400Bin4(),            
+            new AS400Text(15),
+            new AS400Text(1),
+            new AS400Bin4(),            
+            new AS400Text(15),
+            new AS400Text(1),
+            new AS400Bin4(),            
+            new AS400Text(15),
+            new AS400Text(1),
+            new AS400Bin4(),            
+            new AS400Text(15),
+            new AS400Text(1),
+            new AS400Bin4(),            
+            new AS400Text(15),
+            new AS400Text(1),
+            new AS400Bin4()                        
+        };
+        
+        
+        AS400DataType[] netifacSubDataType = new AS400DataType[]{
+            new AS400Text(15),
+            new AS400Text(1),
+            new AS400Bin4(),            
+            //reserved dynamic field not included
+        };
+        
+        if ((secure ? secureConnection : insecureConnection).getVRM() <= 0x00050300)
+           return retrieveUserSpace("NETIFAC", curLib, netifacDataTypeV5R3);
+        if ((secure ? secureConnection : insecureConnection).getVRM() == 0x00050400)
+           return retrieveUserSpace("NETIFAC", curLib, netifacDataTypeV5R4);
+        else if ((secure ? secureConnection : insecureConnection).getVRM() == 0x00060100)
+           return retrieveUserSpace("NETIFAC", curLib, netifacDataTypeV6R1);
+        else if ((secure ? secureConnection : insecureConnection).getVRM() == 0x00070100)
+           return retrieveUserSpace("NETIFAC", curLib, netifacDataTypeV7R1);
+        else if ((secure ? secureConnection : insecureConnection).getVRM() >= 0x00070200)
+           return retrieveUserSpace("NETIFAC", curLib, netifacDataTypeV7R2);
+        else return null;       
+    }
+
     public boolean createUserSpace(String uspcName, String uspcLibrary, String extAttr, int initialSize, String description)
             throws PropertyVetoException, AS400SecurityException, 
                    ErrorCompletingRequestException, IOException, 
@@ -3018,9 +5013,9 @@ public class IBMiConnector {
         AS400Text char50Converter = new AS400Text(50);
         
         
-        String userSpaceName = _padTrimString(uspcName.toUpperCase(), 10);
+        String userSpaceName = IBMiUtilities.padTrimString(uspcName.toUpperCase(), 10);
                 
-        String userSpaceLib = _padTrimString(uspcLibrary.toUpperCase(), 10);
+        String userSpaceLib = IBMiUtilities.padTrimString(uspcLibrary.toUpperCase(), 10);
                 
         AS400DataType[] paramDataType = new AS400DataType[]{
             new AS400Bin4(),
@@ -3058,7 +5053,7 @@ public class IBMiConnector {
         quscusat.setProgram("/qsys.lib/quscusat.pgm", quscusatParms);
                 
         if (!quscusat.run()){
-            Logger.getLogger(IBMiConnector.class.getName()).log(Level.SEVERE, _stringFromAS400Message(quscusat.getMessageList()));
+            Logger.getLogger(IBMiConnector.class.getName()).log(Level.SEVERE, IBMiUtilities.stringFromAS400Message(quscusat.getMessageList()));
             return false;
         }
         return true;
@@ -3082,9 +5077,9 @@ public class IBMiConnector {
         AS400Text char8Converter = new AS400Text(8);
         
         
-        String userSpaceName = _padTrimString(uspcName.toUpperCase(), 10);
+        String userSpaceName = IBMiUtilities.padTrimString(uspcName.toUpperCase(), 10);
                 
-        String userSpaceLib = _padTrimString(uspcLibrary.toUpperCase(), 10);
+        String userSpaceLib = IBMiUtilities.padTrimString(uspcLibrary.toUpperCase(), 10);
                 
         
         qusrusatParms[0] = new ProgramParameter(24);
@@ -3102,7 +5097,7 @@ public class IBMiConnector {
         qusrusat.setProgram("/qsys.lib/qusrusat.pgm", qusrusatParms);
                 
         if (!qusrusat.run()) {
-            Logger.getLogger(IBMiConnector.class.getName()).log(Level.SEVERE, _stringFromAS400Message(qusrusat.getMessageList()));
+            Logger.getLogger(IBMiConnector.class.getName()).log(Level.SEVERE, IBMiUtilities.stringFromAS400Message(qusrusat.getMessageList()));
             return -1;
         }
         
@@ -3116,9 +5111,8 @@ public class IBMiConnector {
       
         AS400Structure returnedDataConverter = new AS400Structure(returnArrayType);
         Object[] returnedArray = (Object[]) returnedDataConverter.toObject(qusrusatParms[0].getOutputData(), 0);
-        return (Integer)(returnedArray[2]);
+        return (int)(returnedArray[2]);
     }
-
     
     public boolean deleteUserSpace(String uspcName, String uspcLibrary)
             throws PropertyVetoException, AS400SecurityException, 
@@ -3224,8 +5218,25 @@ public class IBMiConnector {
                    ErrorCompletingRequestException, IOException, 
                    InterruptedException, ObjectDoesNotExistException, SQLException {
         
-        return retrieveUserSpace(uspcName, uspcLibrary, fieldFormat, 0);
+        return retrieveUserSpace(uspcName, uspcLibrary, fieldFormat, 0, "");
         
+    }
+
+    public String retrieveUserSpace(String uspcName, String uspcLibrary, AS400DataType[] fieldFormat, String databaseName)
+            throws PropertyVetoException, AS400SecurityException, 
+                   ErrorCompletingRequestException, IOException, 
+                   InterruptedException, ObjectDoesNotExistException, SQLException {
+        
+        return retrieveUserSpace(uspcName, uspcLibrary, fieldFormat, 0, "");
+        
+    }    
+    
+    public String retrieveUserSpace(String uspcName, String uspcLibrary, AS400DataType[] fieldFormat, int skipHeaderBytes)
+            throws PropertyVetoException, AS400SecurityException, 
+                   ErrorCompletingRequestException, IOException, 
+                   InterruptedException, ObjectDoesNotExistException, SQLException {
+        
+        return retrieveUserSpace(uspcName, uspcLibrary, fieldFormat, skipHeaderBytes, "");        
     }
     
     public Object[] getUserSpaceHeaderData(String uspcName, String uspcLibrary)
@@ -3239,9 +5250,9 @@ public class IBMiConnector {
         AS400Bin4 bin4 = new AS400Bin4();      
         AS400Text char20Converter = new AS400Text(20);        
 
-        String userSpaceName = _padTrimString(uspcName.toUpperCase(), 10);
+        String userSpaceName = IBMiUtilities.padTrimString(uspcName.toUpperCase(), 10);
 
-        String userSpaceLib = _padTrimString(uspcLibrary.toUpperCase(), 10);
+        String userSpaceLib = IBMiUtilities.padTrimString(uspcLibrary.toUpperCase(), 10);
 
 
         qusrtvusParms[0] = new ProgramParameter(char20Converter.toBytes(userSpaceName + userSpaceLib));
@@ -3254,7 +5265,7 @@ public class IBMiConnector {
         qusrtvusParms[3].setParameterType(ProgramParameter.PASS_BY_REFERENCE);
         qusrtvus.setProgram("/qsys.lib/qusrtvus.pgm", qusrtvusParms);
         if (!qusrtvus.run()) {
-            Logger.getLogger(IBMiConnector.class.getName()).log(Level.SEVERE, _stringFromAS400Message(qusrtvus.getMessageList()));
+            Logger.getLogger(IBMiConnector.class.getName()).log(Level.SEVERE, IBMiUtilities.stringFromAS400Message(qusrtvus.getMessageList()));
             return null;
             }
 
@@ -3270,8 +5281,63 @@ public class IBMiConnector {
         AS400Structure returnedDataConverter = new AS400Structure(headerFormat);
         return (Object[]) returnedDataConverter.toObject(qusrtvusParms[3].getOutputData(), 0);            
     }
-    
-    public String retrieveUserSpace(String uspcName, String uspcLibrary, AS400DataType[] fieldFormat, int skipHeaderBytes)
+
+    public String retrieveUserSpaceFile(String uspcName, String uspcLibrary)
+            throws PropertyVetoException, AS400SecurityException, 
+                   ErrorCompletingRequestException, IOException, 
+                   InterruptedException, ObjectDoesNotExistException, SQLException {
+        
+        int userSpaceLength = getUserSpaceLength(uspcName, uspcLibrary);
+        
+        if ((insecureConnection==null && secureConnection==null) || userSpaceLength <=0 )
+            return null;
+        
+        Object[] offsetData = getUserSpaceHeaderData(uspcName, uspcLibrary);
+        int dataOffset = (int)offsetData[0];
+        
+        ProgramCall qusrtvus = new ProgramCall(secure ? secureConnection : insecureConnection);        
+        ProgramParameter[] qusrtvusParms = new ProgramParameter[4]; //only mandatory params at the moment
+
+        AS400Bin4 bin4 = new AS400Bin4();      
+        AS400Text char20Converter = new AS400Text(20);        
+
+        String userSpaceName = IBMiUtilities.padTrimString(uspcName.toUpperCase(), 10);
+        String userSpaceLib = IBMiUtilities.padTrimString(uspcLibrary.toUpperCase(), 10);
+        
+        int curOffset = 0;
+        
+        File jarFile = new File(IBMiConnector.class.getProtectionDomain().getCodeSource().getLocation().getPath());
+        String jarPath = jarFile.getParentFile().getPath();
+        String userSpaceTempFileName = jarPath + File.separator + uspcLibrary + "_" + uspcName + "_" + new SimpleDateFormat("YYMMddHHmmSS").format(new java.util.Date());
+
+        IBMiUtilities.prepareFile(userSpaceTempFileName);
+        FileOutputStream fileOutStream = new FileOutputStream(userSpaceTempFileName);
+        
+        while (curOffset <= userSpaceLength) {
+            qusrtvusParms[0] = new ProgramParameter(char20Converter.toBytes(userSpaceName + userSpaceLib));
+            qusrtvusParms[0].setParameterType(ProgramParameter.PASS_BY_REFERENCE);
+            qusrtvusParms[1] = new ProgramParameter(bin4.toBytes(curOffset + 1 + dataOffset));           
+            qusrtvusParms[1].setParameterType(ProgramParameter.PASS_BY_REFERENCE);
+            int bufferSize = (userSpaceLength - (curOffset - 1) > DEFAULT_USERSPACE_READ_BUFFER_SIZE ? 
+                    DEFAULT_USERSPACE_READ_BUFFER_SIZE : (int)(userSpaceLength - (curOffset - 1)));
+            qusrtvusParms[2] = new ProgramParameter(bin4.toBytes(bufferSize));           
+            qusrtvusParms[2].setParameterType(ProgramParameter.PASS_BY_REFERENCE);
+            qusrtvusParms[3] = new ProgramParameter(bufferSize);           
+            qusrtvusParms[3].setParameterType(ProgramParameter.PASS_BY_REFERENCE);
+            qusrtvus.setProgram("/qsys.lib/qusrtvus.pgm", qusrtvusParms);
+            if (!qusrtvus.run()) {
+                Logger.getLogger(IBMiConnector.class.getName()).log(Level.SEVERE, IBMiUtilities.stringFromAS400Message(qusrtvus.getMessageList()));
+                return null;
+            }
+            fileOutStream.write(qusrtvusParms[3].getOutputData());
+            curOffset += DEFAULT_USERSPACE_READ_BUFFER_SIZE;
+        }
+        fileOutStream.close();
+
+        return userSpaceTempFileName;
+    }
+
+    public String retrieveUserSpace(String uspcName, String uspcLibrary, AS400DataType[] fieldFormat, int skipHeaderBytes, String databaseName)
             throws PropertyVetoException, AS400SecurityException, 
                    ErrorCompletingRequestException, IOException, 
                    InterruptedException, ObjectDoesNotExistException, SQLException {
@@ -3283,50 +5349,27 @@ public class IBMiConnector {
             interpret the data from the database.
         */
         String dbUserSpaceName = "";        
-        
-        int userSpaceLength = getUserSpaceLength(uspcName, uspcLibrary);
-        int fieldLength = _sumDataTypeFields(fieldFormat);
+        String userSpaceTempFileName = retrieveUserSpaceFile(uspcName, uspcLibrary);
+
+        int fieldLength = IBMiUtilities.sumDataTypeFields(fieldFormat);
         
         if ((insecureConnection==null && secureConnection==null) || 
-             fieldLength == 0 || userSpaceLength <=0 || userSpaceLength < fieldLength )
+             fieldLength == 0 || userSpaceTempFileName == null )
             return dbUserSpaceName;
 
-        dbUserSpaceName = dbTempConnection.createTempTable(uspcName+uspcLibrary, fieldFormat.length);
+        FileInputStream fileInStream = new FileInputStream(userSpaceTempFileName);        
+        dbUserSpaceName = (databaseName == "" ? 
+                                dbTempConnection.createTempTable(uspcName+uspcLibrary, fieldFormat.length)
+                                : databaseName);
         
-        Object[] offsetData = getUserSpaceHeaderData(uspcName, uspcLibrary);
-        int dataOffset = (Integer)offsetData[0];
-        int maxRecords = (userSpaceLength - dataOffset) / fieldLength;
-        for (int curRecord=0; curRecord<maxRecords; curRecord++) {
-            ProgramCall qusrtvus = new ProgramCall(secure ? secureConnection : insecureConnection);        
-            ProgramParameter[] qusrtvusParms = new ProgramParameter[4]; //only mandatory params at the moment
-
-            AS400Bin4 bin4 = new AS400Bin4();      
-            AS400Text char20Converter = new AS400Text(20);        
-
-            String userSpaceName = _padTrimString(uspcName.toUpperCase(), 10);
-
-            String userSpaceLib = _padTrimString(uspcLibrary.toUpperCase(), 10);
-
-
-            qusrtvusParms[0] = new ProgramParameter(char20Converter.toBytes(userSpaceName + userSpaceLib));
-            qusrtvusParms[0].setParameterType(ProgramParameter.PASS_BY_REFERENCE);
-            qusrtvusParms[1] = new ProgramParameter(bin4.toBytes((curRecord*fieldLength)+1+dataOffset));           
-            qusrtvusParms[1].setParameterType(ProgramParameter.PASS_BY_REFERENCE);
-            qusrtvusParms[2] = new ProgramParameter(bin4.toBytes(fieldLength));           
-            qusrtvusParms[2].setParameterType(ProgramParameter.PASS_BY_REFERENCE);
-            qusrtvusParms[3] = new ProgramParameter(fieldLength);           
-            qusrtvusParms[3].setParameterType(ProgramParameter.PASS_BY_REFERENCE);
-            qusrtvus.setProgram("/qsys.lib/qusrtvus.pgm", qusrtvusParms);
-            if (!qusrtvus.run()) {
-                Logger.getLogger(IBMiConnector.class.getName()).log(Level.SEVERE, _stringFromAS400Message(qusrtvus.getMessageList()));
-                return "";
-            }
-            
+        byte[] readBuffer = new byte[fieldLength];
+        
+        while (fileInStream.read(readBuffer) != -1) {            
             AS400Structure returnedDataConverter = new AS400Structure(fieldFormat);
-            Object[] returnedArray = (Object[]) returnedDataConverter.toObject(qusrtvusParms[3].getOutputData(), 0);
+            Object[] returnedArray = (Object[]) returnedDataConverter.toObject(readBuffer, 0);
             if (returnedArray.length != fieldFormat.length) {
                 Logger.getLogger(IBMiConnector.class.getName()).log(Level.SEVERE, "Received data format does not match.");
-                return "";
+                return null;
             }
             
             Vector arrayData = new Vector();
@@ -3340,22 +5383,89 @@ public class IBMiConnector {
         return dbUserSpaceName;
     }
     
-    
+    public String retrieveUserSpace2(String uspcName, String uspcLibrary, AS400DataType[] fieldFormat, int skipHeaderBytes)
+            throws PropertyVetoException, AS400SecurityException, 
+                   ErrorCompletingRequestException, IOException, 
+                   InterruptedException, ObjectDoesNotExistException, SQLException {
+
+        /*
+        Note:
+            fieldFormat defines how many fields are included (fieldFormat.length) and what is their length (every byte).
+            Since the data is converted to String and put into a database, it is up to the external function to 
+            interpret the data from the database.
+        */
+        String dbUserSpaceName = "";        
+        
+        long userSpaceLength = getUserSpaceLength(uspcName, uspcLibrary);
+        int fieldLength = IBMiUtilities.sumDataTypeFields(fieldFormat);
+        
+        if ((insecureConnection==null && secureConnection==null) || 
+             fieldLength == 0 || userSpaceLength <=0 || userSpaceLength < fieldLength )
+            return dbUserSpaceName;
+
+        dbUserSpaceName = dbTempConnection.createTempTable(uspcName+uspcLibrary, fieldFormat.length);
+        
+        Object[] offsetData = getUserSpaceHeaderData(uspcName, uspcLibrary);
+        int dataOffset = (Integer)offsetData[0];
+        int maxRecords = (int)((userSpaceLength - dataOffset) / fieldLength);
+        for (int curRecord=0; curRecord<maxRecords; curRecord++) {
+            ProgramCall qusrtvus = new ProgramCall(secure ? secureConnection : insecureConnection);        
+            ProgramParameter[] qusrtvusParms = new ProgramParameter[4]; //only mandatory params at the moment
+
+            AS400Bin4 bin4 = new AS400Bin4();      
+            AS400Text char20Converter = new AS400Text(20);        
+
+            String userSpaceName = IBMiUtilities.padTrimString(uspcName.toUpperCase(), 10);
+
+            String userSpaceLib = IBMiUtilities.padTrimString(uspcLibrary.toUpperCase(), 10);
+
+            qusrtvusParms[0] = new ProgramParameter(char20Converter.toBytes(userSpaceName + userSpaceLib));
+            qusrtvusParms[0].setParameterType(ProgramParameter.PASS_BY_REFERENCE);
+            qusrtvusParms[1] = new ProgramParameter(bin4.toBytes((curRecord*fieldLength)+1+dataOffset));           
+            qusrtvusParms[1].setParameterType(ProgramParameter.PASS_BY_REFERENCE);
+            qusrtvusParms[2] = new ProgramParameter(bin4.toBytes(fieldLength));           
+            qusrtvusParms[2].setParameterType(ProgramParameter.PASS_BY_REFERENCE);
+            qusrtvusParms[3] = new ProgramParameter(fieldLength);           
+            qusrtvusParms[3].setParameterType(ProgramParameter.PASS_BY_REFERENCE);
+            qusrtvus.setProgram("/qsys.lib/qusrtvus.pgm", qusrtvusParms);
+            if (!qusrtvus.run()) {
+                Logger.getLogger(IBMiConnector.class.getName()).log(Level.SEVERE, IBMiUtilities.stringFromAS400Message(qusrtvus.getMessageList()));
+                return null;
+            }
+            
+            AS400Structure returnedDataConverter = new AS400Structure(fieldFormat);
+            Object[] returnedArray = (Object[]) returnedDataConverter.toObject(qusrtvusParms[3].getOutputData(), 0);
+            if (returnedArray.length != fieldFormat.length) {
+                Logger.getLogger(IBMiConnector.class.getName()).log(Level.SEVERE, "Received data format does not match.");
+                return null;
+            }
+            
+            Vector arrayData = new Vector();
+            
+            for (Object arrayElement : returnedArray)
+                arrayData.addElement(arrayElement.toString().trim());
+            
+            dbTempConnection.insertrow(dbUserSpaceName, arrayData);
+        }
+        
+        return dbUserSpaceName;
+    }
+        
     public String getPTFs2() 
             throws PropertyVetoException, AS400SecurityException, 
-            ErrorCompletingRequestException, IOException, InterruptedException, 
-            ObjectDoesNotExistException, SQLException{
+                   ErrorCompletingRequestException, IOException, InterruptedException, 
+                   ObjectDoesNotExistException, SQLException{
 
         String dbPTFName = "";
         try {
             while (isActiveTask)
                 Thread.sleep(1);
             
-            createUserSpace("ALLPTFS", curLib, "ALLPTFS", 64000, "PTF user space");
+            createUserSpace("ALLPTFS", curLib, "ALLPTFS", 1, "PTF user space");
             if (!makeUserSpaceAutoExtendible("ALLPTFS", curLib, true))
                 return dbPTFName;
 
-            String userSpaceName = _padTrimString("ALLPTFS   " + curLib.toUpperCase(), 20);
+            String userSpaceName = IBMiUtilities.padTrimString("ALLPTFS   " + curLib.toUpperCase(), 20);
             
             ProductList productList = new ProductList(secure ? secureConnection : insecureConnection);
             Product[] products = productList.getProducts();
@@ -3381,10 +5491,10 @@ public class IBMiConnector {
                     Logger.getLogger(IBMiConnector.class.getName()).log(Level.INFO, "Task cancelled");
                     return null;
                 }
-                String productDescription = _padTrimString(product.getProductID(), 7) +
-                                            _padTrimString("*ALL", 6) +
-                                            _padTrimString("*ALL", 4) +
-                                            _padTrimString("*ALL", 10) +
+                String productDescription = IBMiUtilities.padTrimString(product.getProductID(), 7) +
+                                            IBMiUtilities.padTrimString("*ALL", 6) +
+                                            IBMiUtilities.padTrimString("*ALL", 4) +
+                                            IBMiUtilities.padTrimString("*ALL", 10) +
                                             "0" + "0" + new String(new byte[] {0x00,0x00,0x00,0x00,0x00,
                                                                                0x00,0x00,0x00,0x00,0x00,
                                                                                0x00,0x00,0x00,0x00,0x00,
@@ -3411,7 +5521,8 @@ public class IBMiConnector {
                                                                             "/qsys.lib/qpzlstfx.srvpgm", "QpzListPTF",
                                                                             ServiceProgramCall.NO_RETURN_VALUE, qpzlstfxParms);                                
                         if (!qpzlstfx.run()) {                            
-                            Logger.getLogger(IBMiConnector.class.getName()).log(Level.INFO, _stringFromAS400Message(qpzlstfx.getMessageList()));
+                            Logger.getLogger(IBMiConnector.class.getName()).log(Level.INFO, IBMiUtilities.stringFromAS400Message(qpzlstfx.getMessageList()));
+                            return null;
                         }
                         currentTaskProgress = (int)(100.0f * objectCounter/maxObjects);
                         objectCounter++;                        
@@ -3522,7 +5633,7 @@ public class IBMiConnector {
            return retrieveUserSpace("ALLPTFS", curLib, ptfDataTypeV7R1, 101);
         else if ((secure ? secureConnection : insecureConnection).getVersion() == 6)
            return retrieveUserSpace("ALLPTFS", curLib, ptfDataTypeV6R1, 101);
-        else return "";
+        else return null;
     }
                       
     public TreeModel getIFSTreeModel(){
@@ -3538,8 +5649,7 @@ public class IBMiConnector {
         ifsListModel = new IFSFileListModel(root, filter);
         return (ListModel)ifsListModel;
     }
-            
-    
+                
     public DefaultTreeCellRenderer getIFSFileTreeRenderer(){
         return (DefaultTreeCellRenderer)ifsFileTreeRenderer;
     }
@@ -3584,7 +5694,7 @@ public class IBMiConnector {
         *
         */
 
-        if (createUserSpace("RSTFUSRSPC", "QTEMP", " ", 88, "") == false) {
+        if (createUserSpace("RSTFUSRSPC", "QTEMP", " ", 1, "") == false) {
             return false;
         }
 
@@ -3619,7 +5729,7 @@ public class IBMiConnector {
         userSpaceContent.write(bin4.toBytes(new Integer(2)));
         userSpaceContent.write(bin4.toBytes(new Integer(14)));
         userSpaceContent.write(bin4.toBytes(new Integer(1)));
-        userSpaceContent.write(char10Converter.toBytes(padTextRight(restoreLibrary, 10)));
+        userSpaceContent.write(char10Converter.toBytes(IBMiUtilities.padTextRight(restoreLibrary, 10)));
         userSpaceContent.write(bin4.toBytes(new Integer(26)));
         userSpaceContent.write(bin4.toBytes(new Integer(3)));
         userSpaceContent.write(bin4.toBytes(new Integer(14)));
@@ -3628,8 +5738,8 @@ public class IBMiConnector {
         userSpaceContent.write(bin4.toBytes(new Integer(32)));
         userSpaceContent.write(bin4.toBytes(new Integer(4)));
         userSpaceContent.write(bin4.toBytes(new Integer(20)));
-        userSpaceContent.write(char10Converter.toBytes(padTextRight(savfName, 10)));
-        userSpaceContent.write(char10Converter.toBytes(padTextRight(savfLibrary, 10)));
+        userSpaceContent.write(char10Converter.toBytes(IBMiUtilities.padTextRight(savfName, 10)));
+        userSpaceContent.write(char10Converter.toBytes(IBMiUtilities.padTextRight(savfLibrary, 10)));
         
         if (changeUserSpace("RSTFUSRSPC", "QTEMP", 0, userSpaceContent.toByteArray()) == false) {
             deleteUserSpace("RSTFUSRSPC", "QTEMP");            
@@ -3725,94 +5835,34 @@ public class IBMiConnector {
         }        
     }    
     
+    public DefaultTableModel queryResultsTable(String queryString, String[] filterParam) 
+            throws SQLException {
+        return dbTempConnection.query(queryString, filterParam).toTableModel();
+    }
+
+    public DefaultTableModel queryResultsTable(String queryString) 
+            throws SQLException {
+        return dbTempConnection.query(queryString).toTableModel();
+    }
+    
     /////////////////////////////////////////////////////////////////////////////////////
     /////////////////////////////////////////////////////////////////////////////////////
     // PRIVATE METHODS
     /////////////////////////////////////////////////////////////////////////////////////
     /////////////////////////////////////////////////////////////////////////////////////
 
-    private void prepareFile(String fileName) throws IOException {
-        File workFile = new File(fileName);
-        if (!workFile.exists()) {
-            workFile.getParentFile().mkdirs();
-            workFile.createNewFile();
-        }        
+    private String composeDESHashFromTokens(String PW_TOKENa, String PW_TOKENb){
+        //This method is valid only for passwords longer than 8 chars (see RFC2877, 5.2).
+        if (PW_TOKENb.equals("4040404040404040"))
+            return PW_TOKENa;
+
+        long l_a = Long.parseLong(PW_TOKENa, 16); //with JDK1.8,use parseUnsignedLong
+        long l_b = Long.parseLong(PW_TOKENb, 16); //with JDK1.8,use parseUnsignedLong
+        long l_pwtoken = l_a ^ l_b;
+        return String.format("%016x", l_pwtoken).toUpperCase();
     }
     
-    private String _convertLongTimeToString(long time){
-        Date date = new Date(time);
-        Format format = new SimpleDateFormat("yyyy MM dd HH:mm:ss");
-        return format.format(date);
-    }
-
-    private String _padTrimString(String inputString, int len){
-        String outputString = inputString;
-        if (outputString.length() > len)
-            return outputString.substring(0, len-1);
-        
-        while (outputString.length() < len)
-            outputString += " ";
-        
-        return outputString;
-    }
-            
-    private String _stringFromAS400Message(AS400Message[] message){
-        String outputString = "";
-        if (message.length == 0) return "";
-        for (int i=0; i<message.length; i++)
-            outputString += message[i].getText() + "\n" + message[i].getHelp() + "\n";
-        return outputString;
-    }
-
-    private String _stringFromArray(String[] stringArray, String separator) {
-        if (stringArray.length == 0) return "";
-        String outputString = "";
-        for (String stringElement : stringArray){
-            outputString += (outputString == "" ? "" : separator) + stringElement;
-        }
-        return outputString;
-    }    
- 
-    private String _hexStringFromEBCDIC(byte[] inputString){
-
-        if (inputString.length == 0) return "";
-        
-        char[] HEX_CHARS = "0123456789ABCDEF".toCharArray();
-        char[] outputChars = new char[2 * inputString.length];
-        for (int i = 0; i < inputString.length; ++i)
-        {
-            outputChars[2 * i] = HEX_CHARS[(inputString[i] & 0xF0) >>> 4];
-            outputChars[2 * i + 1] = HEX_CHARS[inputString[i] & 0x0F];
-        }
-        return new String(outputChars);
-    }    
-
-    private int _sumDataTypeFields(AS400DataType[] dataTypeArray) {
-        if (dataTypeArray.length == 0)
-            return 0;
-    
-        int dataTypeSum = 0;
-        
-        for (AS400DataType arrayElement : dataTypeArray)
-            dataTypeSum += arrayElement.getByteLength();
-        
-        return dataTypeSum;
-    }
-
-    
-    private int _sumBytes(byte[] byteArray) {
-        if (byteArray.length == 0)
-            return 0;
-    
-        int byteSum = 0;
-        
-        for (byte arrayElement : byteArray)
-            byteSum += arrayElement;
-        
-        return byteSum;
-    }
-    
-    private String _getLastPrintJobNumber() 
+    private String getLastPrintJobNumber() 
             throws PropertyVetoException, AS400SecurityException, 
             ErrorCompletingRequestException, InterruptedException, 
             IOException, ObjectDoesNotExistException {
@@ -3828,7 +5878,7 @@ public class IBMiConnector {
         return curJob.getNumber();
     }
     
-    private int _getLastPrintNumber(String spoolName) 
+    private int getLastPrintNumber(String spoolName) 
             throws PropertyVetoException, AS400Exception, AS400SecurityException, 
             ConnectionDroppedException, ErrorCompletingRequestException, 
             InterruptedException, IOException, RequestNotSupportedException{
@@ -3859,7 +5909,7 @@ public class IBMiConnector {
             return maxNumber;
     }
        
-    private UserList _getAllUserObjects() 
+    private UserList getAllUserObjects() 
             throws AS400SecurityException, ErrorCompletingRequestException, 
             InterruptedException, IOException, ObjectDoesNotExistException, 
             RequestNotSupportedException{
@@ -3888,23 +5938,9 @@ public class IBMiConnector {
             for (String supGroup : curUser.getSupplementalGroups()) {
                 spcAut |= new User((secure ? secureConnection : insecureConnection), supGroup).hasSpecialAuthority(authority);
             }
-        
         return spcAut;
     }   
-    
-    private String padTextRight(String inputText, int length)
-    {
-        if (inputText.length() > length) {
-            return inputText.substring(0, length);
-        }
         
-        String outputText = inputText;
-        while (outputText.length() < length) {
-            outputText += " ";
-        }
-        return outputText;
-    }
-    
     private String prepareAPILengthString(int parameterLength){
         if (parameterLength < 0) return "0000000000.00000";
         
@@ -3933,7 +5969,7 @@ public class IBMiConnector {
         
         return outputList;
     }
-    
+        
     private class AS400FileNameConverter extends AS400File {
 
         AS400FileNameConverter(AS400 system, String name) {
@@ -3947,6 +5983,7 @@ public class IBMiConnector {
           
         
     } 
+    
     
     private class IFSFileListModel implements ListModel {
 
@@ -3962,14 +5999,24 @@ public class IBMiConnector {
             fileList = this.root.list();
         }
 
-        public IFSFileListModel(String root, String filter){ 
+        public IFSFileListModel(String root, final String filter){ 
             this.root = new IFSJavaFile(secure ? secureConnection : insecureConnection, root); 
+            
+            class hack400IFSFileFilter implements IFSFileFilter {
+
+                @Override
+                public boolean accept(IFSFile ifsf) {
+                    return ifsf.getName().toUpperCase().endsWith(filter);
+                }
+                
+            } 
+            /*
             IFSFileFilter = (File dir, String name) -> {
                 String uppercaseName = name.toUpperCase();
                 return uppercaseName.endsWith(filter);
-            };            
+            }; */          
             
-            fileList = this.root.list(IFSFileFilter);
+            fileList = this.root.list(new hack400IFSFileFilter());
         }
         
         @Override
@@ -3999,18 +6046,32 @@ public class IBMiConnector {
     
     private class IFSFileTreeModel implements TreeModel {
         protected IFSJavaFile root;
-        protected IFSFileFilter IFSDirectoryFilter;
         
-        public IFSFileTreeModel(String root){ 
-            this.root = new IFSJavaFile(secure ? secureConnection : insecureConnection, root); 
-            IFSDirectoryFilter = (IFSFile ifsf) -> {
+        class IBMiIFSDirectoryFilter implements IFSFileFilter {
+            @Override
+            public boolean accept(IFSFile ifsf) {
                 try {
                     return ifsf.isDirectory();
                 } catch (IOException ex) {
                     Logger.getLogger(IBMiConnector.class.getName()).log(Level.SEVERE, null, ex);
                     return false;
                 }
-            };
+            }                
+        } 
+        
+        protected IBMiIFSDirectoryFilter IFSDirectoryFilter;
+
+        public IFSFileTreeModel(String root){ 
+            this.root = new IFSJavaFile(secure ? secureConnection : insecureConnection, root); 
+    /*        IFSDirectoryFilter = (IFSFile ifsf) -> {
+                try {
+                    return ifsf.isDirectory();
+                } catch (IOException ex) {
+                    Logger.getLogger(IBMiConnector.class.getName()).log(Level.SEVERE, null, ex);
+                    return false;
+                }
+            };*/
+            IFSDirectoryFilter = new IBMiIFSDirectoryFilter();
         }
 
         public Object getRoot(){ 

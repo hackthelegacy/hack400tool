@@ -1,6 +1,6 @@
 //    "hack400tool"
 //    - security handling tools for IBM Power Systems (formerly known as AS/400)
-//    Copyright (C) 2010-2015  Bart Kulach
+//    Copyright (C) 2010-2017  Bart Kulach
 //    This file, SqliteDbConnector.java, is part of hack400tool package.
 
 //    "hack400tool" is free software: you can redistribute it and/or modify
@@ -61,6 +61,10 @@ public class SqliteDbConnector {
         this(dbName, false);
     }    
 
+    public String getDatabaseFileName(){
+        return databaseName;
+    }
+    
     public void deleteDatabase()
     {
         deleteDatabase(false);
@@ -94,6 +98,25 @@ public class SqliteDbConnector {
         this.query(queryString);
     }
     
+    public String unionTempTables(String[] tableNames) throws SQLException {
+        String realTableName = "unionTemp" + (new SimpleDateFormat("YYMMddHHmmSS").format(new java.util.Date()));
+
+        String queryString = "CREATE VIEW " + realTableName + " AS ";
+        for (int i=0; i<tableNames.length;i++)
+            queryString += "SELECT * FROM "  + tableNames[i] + (i != tableNames.length - 1 ? " UNION ALL " : ";");            
+        this.query(queryString);
+        return realTableName;
+    }
+
+    public String createTempTable(String tableName, String[] colNames) throws SQLException {
+        String realTableName = tableName + (new SimpleDateFormat("YYMMddHHmmSS").format(new java.util.Date()));
+        String queryString = "CREATE TABLE " + realTableName + "(";
+        for (int i=0; i<colNames.length;i++)
+            queryString += colNames[i] + " VARCHAR" + (i != colNames.length - 1 ? ", " : ");");        
+        this.query(queryString);
+        return realTableName;
+    }
+    
     public String createTempTable(String tableName, int colNumber) throws SQLException {
         String realTableName = tableName + (new SimpleDateFormat("YYMMddHHmmSS").format(new java.util.Date()));
         String queryString = "CREATE TABLE " + realTableName + "(_0 VARCHAR";
@@ -103,6 +126,7 @@ public class SqliteDbConnector {
         this.query(queryString);
         return realTableName;
     }
+    
 
     private void prepareFile(String fileName) throws IOException {
         File workFile = new File(fileName);
@@ -126,13 +150,20 @@ public class SqliteDbConnector {
         return new Query(queryString);
     }
     
+    public Query query(String queryString, String[] filterParam) throws SQLException {
+        return new Query(queryString, filterParam);
+    }
+    
     public class Query {
 
         private PreparedStatement statement = null;
         public ResultSet resultSet = null;
         
-        
         Query(String queryString) throws SQLException {
+            this(queryString, null);
+        }
+        
+        Query(String queryString, String[] filterParam) throws SQLException {
             String tmpQuery;
             
             if (queryString.toUpperCase().startsWith("SELECT") ||
@@ -141,6 +172,9 @@ public class SqliteDbConnector {
                 queryString.toUpperCase().startsWith("UPDATE") ||
                 queryString.toUpperCase().startsWith("DELETE")) {
                 statement = dbConnection.prepareStatement(queryString);
+                if (filterParam != null)
+                    for (int i=0; i<filterParam.length; i++)
+                        statement.setString(i+1, filterParam[i]);
                 if (statement.execute())
                     resultSet = statement.getResultSet();
             } else {
@@ -230,8 +264,12 @@ public class SqliteDbConnector {
                 prepareFile(fileName);
                 FileOutputStream fileOutStream = new FileOutputStream(fileName);                
                 Sheet sheet = excelWorkbook.createSheet(fileName.replaceAll("[:\\\\////]", "."));
-
-                int rowNum = 0;
+                Row headerRow = sheet.createRow(0);   
+                for (int i=0; i<numberOfColumns;i++) {
+                    Cell headerCell = headerRow.createCell(i);
+                    headerCell.setCellValue(metaData.getColumnName(i+1));
+                }
+                int rowNum = 1;
                 while (resultSet.next()) {
                     Row row = sheet.createRow(rowNum);
                     for (int colNum=1; colNum <= numberOfColumns; colNum++) {
