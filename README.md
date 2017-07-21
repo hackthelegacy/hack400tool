@@ -24,7 +24,7 @@ The new, major release introduces a number of changes:
 - hack400tool has been rebranded to hack400exploiter (part of hack400tool suite) and includes a number of new or improved functionalities like remote QShell
 - hack400auditor is a new demo program based on enhanced IBMiConnector class, that generates a basic compliance report. A full, commercial version of this program is in development.
 - all tools have received a fresh look (thanks to @5up3rUs3r) and improved GUI error handling
-- IFS explorer have been removed from hack400exploiter.
+- IFS explorer has been removed from hack400exploiter.
 
 2016-06-04 Updates
 - minor code fixes
