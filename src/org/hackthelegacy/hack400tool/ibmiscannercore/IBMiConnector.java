@@ -263,6 +263,8 @@ public class IBMiConnector {
         } catch (Exception ex) {
             Logger.getLogger(IBMiConnector.class.getName()).log(Level.SEVERE, null, ex);
         }
+    
+        //QShell and stdin-stdout initialization
         
         ifsTreeModel = new IFSFileTreeModel("/");
         ifsListModel = new IFSFileListModel("/");
@@ -270,21 +272,23 @@ public class IBMiConnector {
         
         String stdoutFileName = "/tmp/stdout" + new SimpleDateFormat("YYMMddHHmmSS").format(new Date());
         String stderrFileName = "/tmp/stderr" + new SimpleDateFormat("YYMMddHHmmSS").format(new Date());
-        fdStdout = openFileDescriptor(stdoutFileName, O_CREAT|O_TRUNC|O_RDWR, S_IRUSR|S_IWUSR|S_IRGRP|S_IWGRP|S_IROTH|S_IWOTH);
-        fdStderr = openFileDescriptor(stderrFileName, O_CREAT|O_TRUNC|O_RDWR, S_IRUSR|S_IWUSR|S_IRGRP|S_IWGRP|S_IROTH|S_IWOTH);
-        if ((fdStdout>>32) == 1 && (fdStderr>>32) == 2) {
-            runCLCommand("ADDENVVAR ENVVAR(QIBM_USE_DESCRIPTOR_STDIO) VALUE('Y')");
-            runQShellCommand("chmod 666 " + stdoutFileName + " > /dev/null");
-            runQShellCommand("chmod 666 " + stderrFileName + " > /dev/null");
-            stdoutQShell = new IFSFileInputStream((secure ? secureConnection : insecureConnection), stdoutFileName);
-            stderrQShell = new IFSFileInputStream((secure ? secureConnection : insecureConnection), stderrFileName);        
-            isQShellOnline = true;
-        } else{
-            Logger.getLogger(IBMiConnector.class.getName()).log(Level.SEVERE, "QShell connection could not be initialized (cannot open stdout/stderr)."); 
+        try {
+            fdStdout = openFileDescriptor(stdoutFileName, O_CREAT|O_TRUNC|O_RDWR, S_IRUSR|S_IWUSR|S_IRGRP|S_IWGRP|S_IROTH|S_IWOTH);
+            fdStderr = openFileDescriptor(stderrFileName, O_CREAT|O_TRUNC|O_RDWR, S_IRUSR|S_IWUSR|S_IRGRP|S_IWGRP|S_IROTH|S_IWOTH);
+            if ((fdStdout>>32) == 1 && (fdStderr>>32) == 2) {
+                runCLCommand("ADDENVVAR ENVVAR(QIBM_USE_DESCRIPTOR_STDIO) VALUE('Y')");
+                runQShellCommand("chmod 666 " + stdoutFileName + " > /dev/null");
+                runQShellCommand("chmod 666 " + stderrFileName + " > /dev/null");
+                stdoutQShell = new IFSFileInputStream((secure ? secureConnection : insecureConnection), stdoutFileName);
+                stderrQShell = new IFSFileInputStream((secure ? secureConnection : insecureConnection), stderrFileName);        
+                isQShellOnline = true;
+            } else{
+                Logger.getLogger(IBMiConnector.class.getName()).log(Level.SEVERE, "QShell connection could not be initialized (cannot open stdout/stderr)."); 
+            }        
+        } 
+        catch (Exception ex){
+            Logger.getLogger(IBMiConnector.class.getName()).log(Level.SEVERE, "QShell connection could not be initialized (cannot open stdout/stderr).");
         }
-        //DEBUG
-        //END DEBUG
-        
         Logger.getLogger(IBMiConnector.class.getName()).log(Level.INFO, "Connected.");        
     }
 
